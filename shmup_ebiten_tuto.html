@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation Ebiten</title>
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/styles/default.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1, h2, h3 { color: #2c3e50; }
+        code { background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; }
+        pre { background-color: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .section { margin-bottom: 30px; }
+        .subsection { margin-left: 20px; }
+        button { margin: 5px; padding: 5px 10px; cursor: pointer; width: 250px; height: 40px; border-radius: 5px; color: whitesmoke; background-color: #2c3e50; }
+        .talon { margin-bottom: 120px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        function DocSection({ title, content }) {
+            const [isOpen, setIsOpen] = React.useState(false);
+            
+            React.useEffect(() => {
+                if (isOpen) {
+                    hljs.highlightAll();
+                }
+            }, [isOpen]);
+
+            return (
+                <div className="section">
+                    <h2>{title}</h2>
+                    <button onClick={() => setIsOpen(!isOpen)}>{isOpen ? "Masquer" : "Afficher"}</button>
+                    {isOpen && <div dangerouslySetInnerHTML={{__html: content}} />}
+                </div>
+            );
+        }
+
+        function App() {
+            const sections = [
+                {
+                    title: "Introduction à Ebiten",
+                    content: `
+                        <p>Ebiten est une bibliothèque de développement de jeux 2D simple et performante pour Go. Voici les bases pour commencer :</p>
+                        <pre><code class="language-go">
+import "github.com/hajimehoshi/ebiten/v2"
+
+type Game struct{}
+
+func (g *Game) Update() error {
+    // Logique de mise à jour du jeu
+    return nil
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+    // Logique de dessin
+}
+
+func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+    return 320, 240
+}
+
+func main() {
+    ebiten.SetWindowSize(640, 480)
+    ebiten.SetWindowTitle("Mon Jeu Ebiten")
+    if err := ebiten.RunGame(&Game{}); err != nil {
+        log.Fatal(err)
+    }
+}
+                        </code></pre>
+                    `
+                },
+                {
+                    title: "Positionnement des objets",
+                    content: `
+                        <p>Dans Ebiten, les objets sont positionnés sur un système de coordonnées 2D où (0,0) est le coin supérieur gauche de l'écran.</p>
+                        <pre><code class="language-go">
+type GameObject struct {
+    X, Y float64
+    Image *ebiten.Image
+}
+
+func (g *GameObject) Draw(screen *ebiten.Image) {
+    op := &ebiten.DrawImageOptions{}
+    op.GeoM.Translate(g.X, g.Y)
+    screen.DrawImage(g.Image, op)
+}
+                        </code></pre>
+                        <p>Dans cet exemple, X et Y représentent la position de l'objet. La méthode Translate est utilisée pour positionner l'image à l'écran.</p>
+                    `
+                },
+                {
+                    title: "Contrôles et déplacements",
+                    content: `
+                        <p>Ebiten fournit des fonctions pour détecter les entrées clavier et souris. Voici comment gérer le déplacement d'un objet avec les touches fléchées :</p>
+                        <pre><code class="language-go">
+func (g *Game) Update() error {
+    if ebiten.IsKeyPressed(ebiten.KeyLeft) {
+        g.player.X -= 2
+    }
+    if ebiten.IsKeyPressed(ebiten.KeyRight) {
+        g.player.X += 2
+    }
+    if ebiten.IsKeyPressed(ebiten.KeyUp) {
+        g.player.Y -= 2
+    }
+    if ebiten.IsKeyPressed(ebiten.KeyDown) {
+        g.player.Y += 2
+    }
+    return nil
+}
+                        </code></pre>
+                        <p>Pour la souris, vous pouvez utiliser :</p>
+                        <pre><code class="language-go">
+x, y := ebiten.CursorPosition()
+if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+    // Action lors du clic gauche
+}
+                        </code></pre>
+                    `
+                },
+                {
+                    title: "Interface utilisateur de base",
+                    content: `
+                        <p>Ebiten ne fournit pas de widgets d'interface utilisateur intégrés, mais vous pouvez facilement créer des boutons simples :</p>
+                        <pre><code class="language-go">
+type Button struct {
+    X, Y, W, H float64
+    Text string
+    Clicked func()
+}
+
+func (b *Button) Update() {
+    if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+        x, y := ebiten.CursorPosition()
+        if float64(x) >= b.X && float64(x) <= b.X+b.W &&
+           float64(y) >= b.Y && float64(y) <= b.Y+b.H {
+            b.Clicked()
+        }
+    }
+}
+
+func (b *Button) Draw(screen *ebiten.Image) {
+    ebitenutil.DrawRect(screen, b.X, b.Y, b.W, b.H, color.White)
+    text.Draw(screen, b.Text, smallArcadeFont, int(b.X+5), int(b.Y+20), color.Black)
+}
+                        </code></pre>
+                        <p>Ce code crée un bouton simple avec une fonction de rappel lorsqu'il est cliqué.</p>
+                    `
+                },
+                {
+                    title: "Gestion des états de jeu",
+                    content: `
+                        <p>Pour gérer différents états de jeu (menu, jeu en cours, game over, etc.), vous pouvez utiliser une enum et un switch :</p>
+                        <pre><code class="language-go">
+type GameState int
+
+const (
+    StateMenu GameState = iota
+    StatePlay
+    StateGameOver
+)
+
+type Game struct {
+    state GameState
+    // Autres champs...
+}
+
+func (g *Game) Update() error {
+    switch g.state {
+    case StateMenu:
+        // Logique de mise à jour du menu
+    case StatePlay:
+        // Logique de mise à jour du jeu
+    case StateGameOver:
+        // Logique de mise à jour de l'écran game over
+    }
+    return nil
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+    switch g.state {
+    case StateMenu:
+        // Dessin du menu
+    case StatePlay:
+        // Dessin du jeu
+    case StateGameOver:
+        // Dessin de l'écran game over
+    }
+}
+                        </code></pre>
+                        <p>Cette structure permet de séparer clairement la logique pour chaque état du jeu.</p>
+                    `
+                },
+                {
+                    title: "Introduction à Ebiten",
+                    content: `
+                        <p>Ebiten est une bibliothèque de développement de jeux 2D simple et performante pour Go. Voici les bases pour commencer :</p>
+                        <pre><code class="language-go">
+import "github.com/hajimehoshi/ebiten/v2"
+
+type Game struct{}
+
+func (g *Game) Update() error {
+    // Logique de mise à jour du jeu
+    return nil
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+    // Logique de dessin
+}
+
+func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+    return 320, 240
+}
+
+func main() {
+    ebiten.SetWindowSize(640, 480)
+    ebiten.SetWindowTitle("Mon Jeu Ebiten")
+    if err := ebiten.RunGame(&Game{}); err != nil {
+        log.Fatal(err)
+    }
+}
+                        </code></pre>
+                    `
+                },
+                {
+                    title: "Défilement vertical avec parallaxe",
+                    content: `
+                        <p>Pour créer un effet de parallaxe, vous devez dessiner plusieurs couches d'arrière-plan à des vitesses différentes :</p>
+                        <pre><code class="language-go">
+type Game struct {
+    bgLayers []ebiten.Image
+    scrollY  float64
+}
+
+func (g *Game) Update() error {
+    g.scrollY += 1 // Vitesse de défilement
+    return nil
+}
+
+func (g *Game) Draw(screen *ebiten.Image) {
+    // Dessinez chaque couche avec un décalage différent
+    op := &ebiten.DrawImageOptions{}
+    op.GeoM.Translate(0, -g.scrollY*0.5)
+    screen.DrawImage(g.bgLayers[0], op)
+    
+    op.GeoM.Reset()
+    op.GeoM.Translate(0, -g.scrollY)
+    screen.DrawImage(g.bgLayers[1], op)
+}
+                        </code></pre>
+                        <p>L'effet de parallaxe est créé en faisant défiler les couches à des vitesses différentes. La couche la plus éloignée (indice 0) se déplace plus lentement que la couche la plus proche (indice 1).</p>
+                    `
+                },
+                {
+                    title: "Formes 3D simples",
+                    content: `
+                        <p>Bien qu'Ebiten soit principalement une bibliothèque 2D, vous pouvez simuler des formes 3D simples en utilisant des transformations 2D :</p>
+                        <pre><code class="language-go">
+import "math"
+
+func drawCube(screen *ebiten.Image, x, y, size float64, angle float64) {
+    vertices := []struct{ x, y float64 }{
+        {-1, -1}, {1, -1}, {1, 1}, {-1, 1},
+        {-1, -1}, {1, -1}, {1, 1}, {-1, 1},
+    }
+    
+    for i, v := range vertices[:4] {
+        vertices[i].x = v.x*math.Cos(angle) - v.y*math.Sin(angle)
+        vertices[i].y = v.x*math.Sin(angle) + v.y*math.Cos(angle)
+    }
+    
+    for i := 0; i < 4; i++ {
+        x1, y1 := vertices[i].x*size+x, vertices[i].y*size+y
+        x2, y2 := vertices[(i+1)%4].x*size+x, vertices[(i+1)%4].y*size+y
+        ebitenutil.DrawLine(screen, x1, y1, x2, y2, color.White)
+        ebitenutil.DrawLine(screen, x1, y1, x1, y1-size, color.White)
+    }
+}
+                        </code></pre>
+                        <p>Cette fonction dessine un cube simple en perspective. L'angle permet de faire tourner le cube. Les formules mathématiques utilisées sont les équations de rotation 2D :</p>
+                        <p>x' = x * cos(θ) - y * sin(θ)</p>
+                        <p>y' = x * sin(θ) + y * cos(θ)</p>
+                        <p>où θ est l'angle de rotation.</p>
+                    `
+                },
+                {
+                    title: "Animations et physique simple",
+                    content: `
+                        <p>Pour des animations fluides et une physique simple, vous pouvez utiliser des équations de mouvement de base :</p>
+                        <pre><code class="language-go">
+type Object struct {
+    x, y float64
+    vx, vy float64
+    ax, ay float64
+}
+
+func (o *Object) Update(dt float64) {
+    // v = v0 + a * t
+    o.vx += o.ax * dt
+    o.vy += o.ay * dt
+    
+    // x = x0 + v * t
+    o.x += o.vx * dt
+    o.y += o.vy * dt
+}
+                        </code></pre>
+                        <p>Ces équations sont basées sur les lois du mouvement de Newton :</p>
+                        <p>1. v = v0 + a * t (la vitesse est l'intégrale de l'accélération)</p>
+                        <p>2. x = x0 + v * t (la position est l'intégrale de la vitesse)</p>
+                        <p>où v est la vitesse, a est l'accélération, t est le temps, et x est la position.</p>
+                        <p>Pour une chute avec gravité, vous pouvez simplement définir ay = 9.8 (ou une autre valeur selon l'échelle de votre jeu).</p>
+                    `
+                },
+                {
+                    title: "Gestion des collisions",
+                    content: `
+                        <p>Pour la détection de collisions simples, vous pouvez utiliser la méthode des boîtes englobantes :</p>
+                        <pre><code class="language-go">
+func checkCollision(x1, y1, w1, h1, x2, y2, w2, h2 float64) bool {
+    return x1 < x2+w2 &&
+           x1+w1 > x2 &&
+           y1 < y2+h2 &&
+           y1+h1 > y2
+}
+                        </code></pre>
+                        <p>Cette fonction vérifie si deux rectangles (définis par leur position (x, y) et leurs dimensions (w, h)) se chevauchent. Elle retourne true s'il y a collision, false sinon.</p>
+                        <p>Pour des formes plus complexes, vous pouvez utiliser la détection de collision par cercles ou implémenter l'algorithme SAT (Separating Axis Theorem).</p>
+                    `
+                },
+                {
+                    title: "Système de particules",
+                    content: `
+                        <p>Un système de particules simple peut ajouter beaucoup de dynamisme à votre jeu :</p>
+                        <pre><code class="language-go">
+type Particle struct {
+    x, y float64
+    vx, vy float64
+    life int
+}
+
+type ParticleSystem struct {
+    particles []*Particle
+}
+
+func (ps *ParticleSystem) Update() {
+    for i := 0; i < len(ps.particles); i++ {
+        p := ps.particles[i]
+        p.x += p.vx
+        p.y += p.vy
+        p.life--
+        if p.life <= 0 {
+            // Supprimer la particule
+            ps.particles[i] = ps.particles[len(ps.particles)-1]
+            ps.particles = ps.particles[:len(ps.particles)-1]
+            i--
+        }
+    }
+}
+
+func (ps *ParticleSystem) Draw(screen *ebiten.Image) {
+    for _, p := range ps.particles {
+        ebitenutil.DrawRect(screen, p.x, p.y, 2, 2, color.White)
+    }
+}
+
+func (ps *ParticleSystem) Emit(x, y float64, count int) {
+    for i := 0; i < count; i++ {
+        angle := rand.Float64() * 2 * math.Pi
+        speed := rand.Float64() * 2
+        ps.particles = append(ps.particles, &Particle{
+            x: x,
+            y: y,
+            vx: math.Cos(angle) * speed,
+            vy: math.Sin(angle) * speed,
+            life: 60 + rand.Intn(60), // 1-2 secondes à 60 FPS
+        })
+    }
+}
+                        </code></pre>
+                        <p>Ce système de particules utilise des vecteurs simples pour le mouvement. Les particules sont émises dans des directions aléatoires avec des vitesses et des durées de vie variables.</p>
+                    `
+                },
+            ];
+
+            return (
+                <div className="talon">
+                    <h1>Documentation Ebiten pour développement de jeux</h1>
+                    {sections.map((section, index) => 
+                        <DocSection key={index} title={section.title} content={section.content} />
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
