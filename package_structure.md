@@ -1,0 +1,22 @@
+```text
+/shmup
+  main.go
+  /internal
+    /game
+      game.go
+      state.go
+    /entity
+      player.go
+      enemy.go
+    /formation
+      formation.go
+      pattern.go
+    /render
+      draw.go
+    /input
+      input.go
+    /collision
+      collision.go
+    /config
+      config.go
+```
