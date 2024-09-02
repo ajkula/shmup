@@ -1,143 +1,188 @@
 package game
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"sync"
+	"time"
 
-	"github.com/ajkula/shmup/entities"
+	"github.com/ajkula/shmup/config"
+	"github.com/ajkula/shmup/core"
+	"github.com/ajkula/shmup/entity"
+	"github.com/ajkula/shmup/event"
+	"github.com/ajkula/shmup/manager"
+	"github.com/ajkula/shmup/state"
+	"github.com/ajkula/shmup/system"
+	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
 
 const (
-	ScreenWidth   = 640
-	ScreenHeight  = 928
-	EnemyCount    = 10
-	BossThreshold = 50 // Nombre d'ennemis à détruire avant l'apparition du boss
+	fixedDeltaTime = 1.0 / 60.0 // 60 fps
+	maxDeltaTime   = 1.0 / 10.0 // max time between updates (10 fps)
 )
 
 type Game struct {
-	player                *entities.Player
-	enemyFormations       []*entities.EnemyFormation
-	currentFormation      *entities.EnemyFormation
-	boss                  *entities.Boss
-	score                 int
-	level                 int
-	gameState             int
-	elapsedTime           float64
-	formationTimer        float64
-	formationInterval     float64
-	destroyedEnemiesCount int
+	ctx            context.Context
+	cancel         context.CancelFunc
+	systems        []core.System
+	lastUpdateTime time.Time
+	accumulator    float64
+	player         *entity.Player
+	wg             sync.WaitGroup
+	updateChan     chan float64
+	errChan        chan error
 }
 
-func NewGame() *Game {
+func NewGame(ctx context.Context) (*Game, error) {
+	gameCtx, cancel := context.WithCancel(ctx)
+
+	eventManager := event.NewEventManager()
+	if err := eventManager.Initialize(gameCtx); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to initialize event manager: %w", err)
+	}
+	stateManager := state.NewStateManager(eventManager)
+
 	g := &Game{
-		player:            entities.NewPlayer(ScreenWidth/2, ScreenHeight-50),
-		enemyFormations:   make([]*entities.EnemyFormation, 0),
-		formationInterval: 3.0, // 3 secondes entre chaque formation
-		formationTimer:    0,
+		ctx:            gameCtx,
+		cancel:         cancel,
+		systems:        make([]core.System, 0),
+		lastUpdateTime: time.Now(),
+		accumulator:    0,
+		updateChan:     make(chan float64, 1),
+		errChan:        make(chan error, 1),
 	}
 
-	g.generateNewFormations()
+	// initialize systems
+	renderSystem := system.NewRenderSystem()
+	collisionSystem := system.NewCollisionSystem(eventManager)
+	inputSystem := system.NewInputSystem(eventManager)
+	updateSystem := system.NewUpdateSystem()
 
-	return g
+	// initialize managers
+	enemyManager := manager.NewEnemyManager(eventManager)
+	bulletManager := manager.NewBulletManager(eventManager)
+	scoreManager := manager.NewScoreManager(eventManager)
+	levelManager := manager.NewLevelManager(eventManager)
+
+	// add all systems and managers to the game
+	g.systems = append(g.systems,
+		eventManager,
+		stateManager,
+		renderSystem,
+		collisionSystem,
+		inputSystem,
+		updateSystem,
+		enemyManager,
+		bulletManager,
+		scoreManager,
+		levelManager,
+	)
+
+	// initialize all systems
+	for _, sys := range g.systems {
+		if err := sys.Initialize(gameCtx); err != nil {
+			cancel()
+			return nil, fmt.Errorf("failed to initialize system: %w", err)
+		}
+	}
+
+	// create player
+	g.player = entity.NewPlayer(
+		types.Vector2D{
+			X: float64(config.Config.ScreenWidth / 2),
+			Y: float64(config.Config.ScreenHeight - 50),
+		},
+		eventManager,
+	)
+
+	return g, nil
 }
 
 func (g *Game) Update() error {
-	deltaTime := 1.0 / 60.0
-	g.elapsedTime += deltaTime
-	g.formationTimer += deltaTime
+	select {
+	case <-g.ctx.Done():
+		return g.ctx.Err()
+	case err := <-g.errChan:
+		g.Shutdown()
+		return fmt.Errorf("critical error occurred: %w", err)
+	default:
+		currentTime := time.Now()
+		deltaTime := currentTime.Sub(g.lastUpdateTime).Seconds()
+		g.lastUpdateTime = currentTime
 
-	g.player.Update(deltaTime, ScreenWidth, ScreenHeight)
-
-	if g.currentFormation == nil {
-		if g.formationTimer >= g.formationInterval {
-			g.spawnNewFormation()
-			g.formationTimer = 0
+		if deltaTime > maxDeltaTime {
+			deltaTime = maxDeltaTime
 		}
-	} else {
-		formationComplete := g.currentFormation.Update(deltaTime)
-		if formationComplete {
-			g.currentFormation = nil
-			g.formationTimer = 0
-			g.spawnNewFormation()
+
+		g.accumulator += deltaTime
+
+		for g.accumulator >= fixedDeltaTime {
+			select {
+			case <-g.ctx.Done():
+				return g.ctx.Err()
+			default:
+				g.updateChan <- fixedDeltaTime
+				g.accumulator -= fixedDeltaTime
+			}
 		}
 	}
 
-	fmt.Printf("Current formation: %v, Formation timer: %.2f\n", g.currentFormation != nil, g.formationTimer)
 	return nil
 }
 
-func (g *Game) spawnNewFormation() {
-	if len(g.enemyFormations) == 0 {
-		g.generateNewFormations()
-	}
-	if len(g.enemyFormations) > 0 {
-		g.currentFormation = g.enemyFormations[0]
-		g.enemyFormations = g.enemyFormations[1:]
-		fmt.Println("Spawned new formation") // Log pour le débogage
-	} else {
-		fmt.Println("No formations available to spawn")
-	}
-}
-
-func (g *Game) generateNewFormations() {
-	g.enemyFormations = append(g.enemyFormations,
-		entities.NewEnemyFormation(entities.ColumnPattern, 6, ScreenWidth/2, -100, 80),
-		entities.NewEnemyFormation(entities.RowPattern, 6, ScreenWidth/2, -100, 100),
-		entities.NewEnemyFormation(entities.LoopPattern, 6, ScreenWidth/2, -200, 40),
-	)
-	fmt.Println("Generated new formations")
-}
-
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.player.Draw(screen)
+	if renderSystem, ok := g.systems[2].(*system.RenderSystem); ok {
+		renderSystem.Render(screen)
+	}
+}
 
-	if g.currentFormation != nil && len(g.currentFormation.Enemies) > 0 {
-		enemiesDrawn := 0
-		for i, e := range g.currentFormation.Enemies {
-			if e != nil && e.Y >= 0 && e.Y < ScreenHeight {
-				e.Draw(screen)
-				enemiesDrawn++
-				fmt.Printf("Drawing enemy %d at (%.2f, %.2f)\n", i, e.X, e.Y)
+func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+	return config.Config.ScreenWidth, config.Config.ScreenHeight
+}
+
+func (g *Game) Run() {
+	g.wg.Add(len(g.systems))
+	for _, sys := range g.systems {
+		go func(s core.System) {
+			defer g.wg.Done()
+
+			for {
+				select {
+				case <-g.ctx.Done():
+					return
+				case dt := <-g.updateChan:
+					if err := s.Update(dt); err != nil {
+						if err != context.Canceled {
+							log.Printf("Error running system: %v", err)
+						}
+						g.handleCriticalError(err)
+						return
+					}
+				}
 			}
-		}
-		fmt.Printf("Drawing formation: %d enemies drawn\n", enemiesDrawn)
-	}
 
-	enemyCount := 0
-	if g.currentFormation != nil {
-		enemyCount = len(g.currentFormation.Enemies)
-	}
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("Time: %.2f, Enemies: %d", g.elapsedTime, enemyCount))
-}
-
-func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return ScreenWidth, ScreenHeight
-}
-
-func (g *Game) enemyDestroyed() {
-	g.destroyedEnemiesCount++
-	g.score += 10 // Augmenter le score quand un ennemi est détruit
-
-	if g.destroyedEnemiesCount >= BossThreshold {
-		g.spawnBoss()
+		}(sys)
 	}
 }
 
-func (g *Game) spawnBoss() {
-	// Créer et initialiser le boss
-	g.boss = entities.NewBoss(ScreenWidth/2, -100) // Supposons que NewBoss existe dans le package entities
-	g.destroyedEnemiesCount = 0                    // Réinitialiser le compteur
+func (g *Game) handleCriticalError(err error) {
+	select {
+	case g.errChan <- err:
+	default:
+		log.Printf("Critical error occurred but error channel is full: %v", err)
+	}
+	g.cancel()
 }
 
-func (g *Game) updateBoss(deltaTime float64) {
-	if g.boss != nil {
-		g.boss.Update(deltaTime)
-		// Vérifier si le boss est vaincu
-		if g.boss.IsDead() {
-			g.boss = nil
-			g.level++       // Augmenter le niveau après avoir vaincu le boss
-			g.score += 1000 // Bonus de score pour avoir vaincu le boss
-		}
+func (g *Game) Shutdown() {
+	g.cancel()
+	for _, sys := range g.systems {
+		sys.Shutdown()
 	}
+	g.wg.Wait()
+	close(g.updateChan)
+	close(g.errChan)
 }

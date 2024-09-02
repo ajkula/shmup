@@ -13,14 +13,12 @@ type Point3D struct {
 }
 
 func DrawTriangle(screen *ebiten.Image, x, y, size float64, rotation float64, c color.Color) {
-	// Define triangle points
 	points := []struct{ x, y float64 }{
 		{0, size / 2},          // Top
 		{-size / 2, -size / 2}, // Bottom right
 		{size / 2, -size / 2},  // Bottom left
 	}
 
-	// Rotate and translate points
 	cosR, sinR := math.Cos(rotation), math.Sin(rotation)
 	for i := range points {
 		px, py := points[i].x, points[i].y
@@ -28,18 +26,15 @@ func DrawTriangle(screen *ebiten.Image, x, y, size float64, rotation float64, c 
 		points[i].y = px*sinR + py*cosR + y
 	}
 
-	// Draw the triangle
 	vector.StrokeLine(screen, float32(points[0].x), float32(points[0].y), float32(points[1].x), float32(points[1].y), 1, c, true)
 	vector.StrokeLine(screen, float32(points[1].x), float32(points[1].y), float32(points[2].x), float32(points[2].y), 1, c, true)
 	vector.StrokeLine(screen, float32(points[2].x), float32(points[2].y), float32(points[0].x), float32(points[0].y), 1, c, true)
 }
 
 func DrawCube3D(screen *ebiten.Image, x, y, z, size float64, c color.Color) {
-	// Isometric projection constants
 	cos30 := math.Cos(math.Pi / 6)
 	sin30 := math.Sin(math.Pi / 6)
 
-	// Calculate cube vertices
 	halfSize := size / 2
 	vertices := []struct{ x, y, z float64 }{
 		{-halfSize, -halfSize, -halfSize},
@@ -52,7 +47,6 @@ func DrawCube3D(screen *ebiten.Image, x, y, z, size float64, c color.Color) {
 		{-halfSize, halfSize, halfSize},
 	}
 
-	// Project 3D points to 2D isometric view
 	points2D := make([][2]float64, 8)
 	for i, v := range vertices {
 		isoX := (v.x - v.y) * cos30
@@ -61,14 +55,12 @@ func DrawCube3D(screen *ebiten.Image, x, y, z, size float64, c color.Color) {
 		points2D[i][1] = y + isoY
 	}
 
-	// Define edges
 	edges := [][2]int{
-		{0, 1}, {1, 2}, {2, 3}, {3, 0}, // Bottom face
-		{4, 5}, {5, 6}, {6, 7}, {7, 4}, // Top face
-		{0, 4}, {1, 5}, {2, 6}, {3, 7}, // Connecting edges
+		{0, 1}, {1, 2}, {2, 3}, {3, 0},
+		{4, 5}, {5, 6}, {6, 7}, {7, 4},
+		{0, 4}, {1, 5}, {2, 6}, {3, 7},
 	}
 
-	// Draw edges
 	for _, edge := range edges {
 		p1 := points2D[edge[0]]
 		p2 := points2D[edge[1]]
