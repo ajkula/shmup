@@ -1,4 +1,4 @@
-name: Go
+name: Shmup CI/CD
 
 on:
   push:
@@ -11,20 +11,64 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.21.0'
-
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev xorg-dev xvfb
-
     - name: Run tests with Xvfb
       run: |
         export DISPLAY=:99
         Xvfb :99 &
-        sleep 3  # give xvfb some time to start
+        sleep 3
         go test -v ./... -race
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21.0'
+    - name: Build
+      run: go build -v -o shmup ./...
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: shmup
+        path: shmup
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    steps:
+    - uses: actions/checkout@v4
+    - name: Download artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: shmup
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Shmup Release ${{ github.run_number }}
+        draft: false
+        prerelease: false
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./shmup
+        asset_name: shmup
+        asset_content_type: application/octet-stream
