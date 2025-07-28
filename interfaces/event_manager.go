@@ -9,6 +9,7 @@ const (
 	InputEvent
 	GameStateChangeEvent
 	LevelEvent
+	LevelChanged
 	ScoreEvent
 	ScoreReset
 	PlayerShot
@@ -28,11 +29,12 @@ const (
 	EnemyRemovedFromFormation
 	FormationCreated
 	FormationDestroyed
+	EntityMoved
 )
 
 type Event struct {
 	Type EventType
-	Data interface{}
+	Data any
 }
 
 type EventManagerInterface interface {
@@ -40,7 +42,7 @@ type EventManagerInterface interface {
 	Update(deltaTime float64) error
 	Run(ctx context.Context) error
 	Shutdown()
-	Publish(eventType EventType, data interface{}) error
+	Publish(eventType EventType, data any) error
 	Subscribe(eventType EventType) (<-chan Event, error)
 	Unsubscribe(eventType EventType, ch <-chan Event) error
 }

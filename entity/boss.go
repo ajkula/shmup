@@ -1,9 +1,8 @@
 package entity
 
 import (
-	"math"
+	"time"
 
-	"github.com/ajkula/shmup/common"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -13,8 +12,7 @@ type Boss struct {
 	types.BaseEntity
 	phase         int
 	eventManager  interfaces.EventManagerInterface
-	ShootCooldown float64
-	maxCooldown   float64
+	shootCooldown *ThreadSafeCooldown
 }
 
 func NewBoss(position types.Vector2D, eventManager interfaces.EventManagerInterface) *Boss {
@@ -27,13 +25,12 @@ func NewBoss(position types.Vector2D, eventManager interfaces.EventManagerInterf
 		},
 		phase:         1,
 		eventManager:  eventManager,
-		ShootCooldown: 0,
-		maxCooldown:   0.2,
+		shootCooldown: NewThreadSafeCooldown(0.2), // 0.2 seconds like original
 	}
 }
 
 func (b *Boss) Update(deltaTime float64) error {
-	b.ShootCooldown = math.Max(0, b.ShootCooldown-deltaTime)
+	b.shootCooldown.Update(deltaTime) // Update cooldown with deltaTime
 	if b.CanShoot() {
 		b.Shoot()
 	}
@@ -67,17 +64,33 @@ func (b *Boss) OnCollision(other types.Entity) {
 }
 
 func (b *Boss) CanShoot() bool {
-	return b.ShootCooldown < common.Epsilon
+	return b.shootCooldown.CanAct()
 }
 
-func (b *Boss) Shoot() {
-	b.eventManager.Publish(interfaces.BossShot, b)
-	b.ShootCooldown = b.maxCooldown
+func (b *Boss) Shoot() bool {
+	if b.shootCooldown.TryAct() {
+		b.eventManager.Publish(interfaces.BossShot, b)
+		return true
+	}
+	return false
 }
 
 func (b *Boss) ChangePhase(newPhase int) {
 	b.phase = newPhase
 	b.eventManager.Publish(interfaces.BossPhaseChanged, b)
+}
+
+func (b *Boss) GetShootCooldownRemaining() time.Duration {
+	return b.shootCooldown.GetRemainingCooldown()
+}
+
+func (b *Boss) ResetShootCooldown() {
+	b.shootCooldown.Reset()
+}
+
+func (b *Boss) SetShootRate(ratePerSecond float64) {
+	cooldownTime := 1.0 / ratePerSecond // Convert to seconds
+	b.shootCooldown.SetCooldownTime(cooldownTime)
 }
 
 var _ types.GameEntity = (*Boss)(nil)

@@ -1,97 +1,91 @@
 package entity
 
 import (
-	"github.com/ajkula/shmup/interfaces"
+	"math"
+
 	"github.com/ajkula/shmup/types"
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
+type FormationPattern func(t float64) types.Vector2D
+
 type Formation struct {
-	types.BaseEntity
-	enemies       []types.GameEntity
-	formationType types.FormationType
-	pattern       types.MovementPattern
-	complete      bool
-	eventManager  interfaces.EventManagerInterface
+	ID        string
+	EnemyIDs  []string
+	Pattern   FormationPattern
+	CenterPos types.Vector2D
+	Time      float64
 }
 
-func NewFormation(formationType types.FormationType, pattern types.MovementPattern, position types.Vector2D, eventManager interfaces.EventManagerInterface) *Formation {
+func NewFormation(id string, pattern FormationPattern, centerPos types.Vector2D) *Formation {
 	return &Formation{
-		BaseEntity: types.BaseEntity{
-			Position: position,
-		},
-		enemies:       make([]types.GameEntity, 0),
-		formationType: formationType,
-		pattern:       pattern,
-		complete:      false,
-		eventManager:  eventManager,
+		ID:        id,
+		EnemyIDs:  make([]string, 0),
+		Pattern:   pattern,
+		CenterPos: centerPos,
+		Time:      0,
 	}
 }
 
-func (f *Formation) Update(deltaTime float64) error {
-	if f.pattern != nil {
-		formationMembers := make([]types.FormationMember, len(f.enemies))
-		for i, enemy := range f.enemies {
-			formationMembers[i] = enemy.(types.FormationMember)
-		}
-		f.pattern.Move(formationMembers, deltaTime)
-	}
-	f.checkCompletion()
-	return nil
+func (f *Formation) AddEnemy(enemyID string) {
+	f.EnemyIDs = append(f.EnemyIDs, enemyID)
 }
 
-func (f *Formation) Draw(screen *ebiten.Image) {
-	for _, enemy := range f.enemies {
-		enemy.Draw(screen)
-	}
-}
-
-func (f *Formation) GetEntities() []types.Entity {
-	entities := make([]types.Entity, len(f.enemies))
-	for i, enemy := range f.enemies {
-		entities[i] = enemy
-	}
-	return entities
-}
-
-func (f *Formation) AddEntity(e types.Entity) {
-	if enemy, ok := e.(types.GameEntity); ok {
-		f.enemies = append(f.enemies, enemy)
-		f.eventManager.Publish(interfaces.EnemyAddedToFormation, enemy)
-	}
-}
-
-func (f *Formation) RemoveEntity(e types.Entity) {
-	for i, enemy := range f.enemies {
-		if enemy == e {
-			f.enemies = append(f.enemies[:i], f.enemies[i+1:]...)
-			f.eventManager.Publish(interfaces.EnemyRemovedFromFormation, enemy)
+func (f *Formation) RemoveEnemy(enemyID string) {
+	for i, id := range f.EnemyIDs {
+		if id == enemyID {
+			f.EnemyIDs = append(f.EnemyIDs[:i], f.EnemyIDs[i+1:]...)
 			break
 		}
 	}
 }
 
-func (f *Formation) IsComplete() bool {
-	return f.complete
-}
+// Getters and setters
+func (f *Formation) GetID() string                   { return f.ID }
+func (f *Formation) GetEnemyIDs() []string           { return f.EnemyIDs }
+func (f *Formation) GetPattern() FormationPattern    { return f.Pattern }
+func (f *Formation) GetCenterPos() types.Vector2D    { return f.CenterPos }
+func (f *Formation) SetCenterPos(pos types.Vector2D) { f.CenterPos = pos }
+func (f *Formation) GetTime() float64                { return f.Time }
+func (f *Formation) SetTime(t float64)               { f.Time = t }
 
-func (f *Formation) GetFormationType() types.FormationType {
-	return f.formationType
-}
-
-func (f *Formation) SetPattern(pattern types.MovementPattern) {
-	f.pattern = pattern
-}
-
-func (f *Formation) GetPattern() types.MovementPattern {
-	return f.pattern
-}
-
-func (f *Formation) checkCompletion() {
-	if !f.IsComplete() && len(f.enemies) == 0 {
-		f.complete = true
-		f.eventManager.Publish(interfaces.FormationDestroyed, f)
+var (
+	CirclePattern = func(radius float64) FormationPattern {
+		return func(t float64) types.Vector2D {
+			return types.Vector2D{
+				X: math.Cos(t) * radius,
+				Y: math.Sin(t) * radius,
+			}
+		}
 	}
+
+	SineWavePattern = func(amplitude, frequency float64) FormationPattern {
+		return func(t float64) types.Vector2D {
+			return types.Vector2D{
+				X: t * frequency,
+				Y: math.Sin(t) * amplitude,
+			}
+		}
+	}
+
+	VFormationPattern = func(spacing float64) FormationPattern {
+		return func(t float64) types.Vector2D {
+			return types.Vector2D{
+				X: spacing * math.Cos(math.Pi/6),
+				Y: spacing * math.Sin(math.Pi/6),
+			}
+		}
+	}
+)
+
+// Fonction pour créer des formations spécifiques
+func NewCircleFormation(id string, centerPos types.Vector2D, radius float64) *Formation {
+	return NewFormation(id, CirclePattern(radius), centerPos)
 }
 
-var _ types.Formation = (*Formation)(nil)
+func NewSineWaveFormation(id string, centerPos types.Vector2D, amplitude, frequency float64) *Formation {
+	return NewFormation(id, SineWavePattern(amplitude, frequency), centerPos)
+}
+
+func NewVFormation(id string, centerPos types.Vector2D, spacing float64) *Formation {
+	return NewFormation(id, VFormationPattern(spacing), centerPos)
+}

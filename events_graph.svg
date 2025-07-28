@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4000 4000">
+    <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="0" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" />
+        </marker>
+    </defs>
+    
+    <!-- Composants principaux (inchangés) -->
+    <circle cx="2000" cy="2000" r="200" fill="#FFDAB9" />
+    <text x="2000" y="2010" text-anchor="middle" font-size="36" fill="black">EventManager</text>
+    
+    <circle cx="2000" cy="2000" r="1000" fill="none" stroke="#888" stroke-dasharray="5,5" />
+    
+    <circle cx="2000" cy="1000" r="150" fill="#FFA07A" />
+    <text x="2000" y="1010" text-anchor="middle" font-size="30" fill="black">Game</text>
+    
+    <circle cx="1000" cy="1400" r="150" fill="#98FB98" />
+    <text x="1000" y="1410" text-anchor="middle" font-size="30" fill="black">InputSystem</text>
+    
+    <circle cx="3000" cy="1400" r="150" fill="#87CEFA" />
+    <text x="3000" y="1410" text-anchor="middle" font-size="30" fill="black">PlayerManager</text>
+    
+    <circle cx="1000" cy="2600" r="150" fill="#DDA0DD" />
+    <text x="1000" y="2610" text-anchor="middle" font-size="30" fill="black">EnemyManager</text>
+    
+    <circle cx="3000" cy="2600" r="150" fill="#F0E68C" />
+    <text x="3000" y="2610" text-anchor="middle" font-size="30" fill="black">BulletManager</text>
+    
+    <circle cx="2000" cy="3000" r="150" fill="#FF6347" />
+    <text x="2000" y="3010" text-anchor="middle" font-size="30" fill="black">CollisionSystem</text>
+    
+    <circle cx="500" cy="2000" r="150" fill="#20B2AA" />
+    <text x="500" y="2010" text-anchor="middle" font-size="30" fill="black">GameLogicSystem</text>
+    
+    <circle cx="3500" cy="2000" r="150" fill="#FFB6C1" />
+    <text x="3500" y="2010" text-anchor="middle" font-size="30" fill="black">RenderSystem</text>
+    
+    <!-- Flèches d'événements (existantes et nouvelles) -->
+    <!-- InputSystem <-> EventManager -->
+    <path d="M1150 1450 Q 1600 1700 1850 1900" fill="none" stroke="#4CAF50" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1400" y="1600" fill="#4CAF50" font-size="24">Publish: PlayerMoveCommand</text>
+    <text x="1400" y="1640" fill="#4CAF50" font-size="24">Publish: PlayerShootCommand</text>
+    
+    <!-- EventManager <-> PlayerManager -->
+    <path d="M2150 1900 Q 2400 1700 2850 1450" fill="none" stroke="#2196F3" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2400" y="1600" fill="#2196F3" font-size="24">Subscribe: PlayerMoveCommand</text>
+    <text x="2400" y="1640" fill="#2196F3" font-size="24">Subscribe: PlayerShootCommand</text>
+    
+    <path d="M2850 1500 Q 2400 1750 2150 1950" fill="none" stroke="#2196F3" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2400" y="1750" fill="#2196F3" font-size="24">Publish: PlayerMoved</text>
+    <text x="2400" y="1790" fill="#2196F3" font-size="24">Publish: PlayerShot</text>
+    
+    <!-- EventManager <-> BulletManager -->
+    <path d="M2150 2100 Q 2400 2300 2850 2550" fill="none" stroke="#FFC107" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2400" y="2300" fill="#FFC107" font-size="24">Subscribe: CreateBullet</text>
+    
+    <path d="M2850 2550 Q 2400 2350 2150 2150" fill="none" stroke="#FFC107" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2400" y="2400" fill="#FFC107" font-size="24">Publish: BulletCreated</text>
+    <text x="2400" y="2440" fill="#FFC107" font-size="24">Publish: BulletDestroyed</text>
+    
+    <!-- EnemyManager <-> EventManager -->
+    <path d="M1150 2550 Q 1600 2350 1850 2150" fill="none" stroke="#9C27B0" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1300" y="2400" fill="#9C27B0" font-size="24">Publish: EnemyCreated</text>
+    <text x="1300" y="2440" fill="#9C27B0" font-size="24">Publish: EnemyDestroyed</text>
+    <text x="1300" y="2480" fill="#9C27B0" font-size="24">Publish: EnemyMoved</text>
+    
+    <!-- EventManager <-> CollisionSystem -->
+    <line x1="2020" y1="2200" x2="2020" y2="2850" stroke="#FF5722" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2040" y="2550" fill="#FF5722" font-size="24">Subscribe: EntityMoved</text>
+    
+    <line x1="1980" y1="2850" x2="1980" y2="2200" stroke="#FF5722" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1700" y="2550" fill="#FF5722" font-size="24">Publish: CollisionDetected</text>
+    
+    <!-- EventManager <-> GameLogicSystem -->
+    <path d="M1800 1950 Q 1150 1980 650 1980" fill="none" stroke="#009688" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1000" y="1900" fill="#009688" font-size="24">Subscribe: EnemyDestroyed</text>
+    <text x="1000" y="1940" fill="#009688" font-size="24">Subscribe: PlayerHit</text>
+    <text x="1000" y="1980" fill="#009688" font-size="24">Subscribe: BulletDestroyed</text>
+    
+    <path d="M650 2020 Q 1150 2020 1800 2050" fill="none" stroke="#009688" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1000" y="2060" fill="#009688" font-size="24">Publish: ScoreUpdated</text>
+    <text x="1000" y="2100" fill="#009688" font-size="24">Publish: GameStateChanged</text>
+    <text x="1000" y="2140" fill="#009688" font-size="24">Publish: LevelComplete</text>
+    <text x="1000" y="2180" fill="#009688" font-size="24">Publish: GameOver</text>
+    
+    <!-- EventManager <-> RenderSystem -->
+    <path d="M2200 2000 Q 2850 2000 3350 2000" fill="none" stroke="#E91E63" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2700" y="1900" fill="#E91E63" font-size="24">Subscribe: EntityMoved</text>
+    <text x="2700" y="1940" fill="#E91E63" font-size="24">Subscribe: GameStateChanged</text>
+    <text x="2700" y="1980" fill="#E91E63" font-size="24">Subscribe: ScoreUpdated</text>
+    
+    <!-- EventManager <-> Game -->
+    <line x1="2000" y1="1800" x2="2000" y2="1150" stroke="#673AB7" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2020" y="1500" fill="#673AB7" font-size="24">Subscribe: GameOver</text>
+    <text x="2020" y="1540" fill="#673AB7" font-size="24">Subscribe: LevelComplete</text>
+    
+    <line x1="1980" y1="1150" x2="1980" y2="1800" stroke="#673AB7" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1700" y="1500" fill="#673AB7" font-size="24">Publish: GameInitialized</text>
+    <text x="1700" y="1540" fill="#673AB7" font-size="24">Publish: GamePaused</text>
+    <text x="1700" y="1580" fill="#673AB7" font-size="24">Publish: GameResumed</text>
+    
+    <!-- Nouveaux événements ajoutés -->
+    <path d="M1850 1850 Q 1400 1700 650 1950" fill="none" stroke="#795548" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="1000" y="1800" fill="#795548" font-size="24">Subscribe: GameInitialized</text>
+    <text x="1000" y="1840" fill="#795548" font-size="24">Subscribe: GamePaused</text>
+    <text x="1000" y="1880" fill="#795548" font-size="24">Subscribe: GameResumed</text>
+    
+    <path d="M2150 1850 Q 2600 1700 3350 1950" fill="none" stroke="#607D8B" stroke-width="3" marker-end="url(#arrowhead)" />
+    <text x="2700" y="1800" fill="#607D8B" font-size="24">Subscribe: GameInitialized</text>
+    <text x="2700" y="1840" fill="#607D8B" font-size="24">Subscribe: GamePaused</text>
+    <text x="2700" y="1880" fill="#607D8B" font-size="24">Subscribe: GameResumed</text>
+</svg>

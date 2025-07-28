@@ -52,14 +52,13 @@ func NewGame(ctx context.Context) (*Game, error) {
 		lastUpdateTime: time.Now(),
 		accumulator:    0,
 		updateChan:     make(chan float64, 1),
-		errChan:        make(chan error, 1),
+		errChan:        make(chan error, 10),
 	}
 
 	// initialize systems
 	renderSystem := system.NewRenderSystem()
 	collisionSystem := system.NewCollisionSystem(eventManager)
 	inputSystem := system.NewInputSystem(eventManager)
-	updateSystem := system.NewUpdateSystem()
 
 	// initialize managers
 	enemyManager := manager.NewEnemyManager(eventManager)
@@ -74,7 +73,6 @@ func NewGame(ctx context.Context) (*Game, error) {
 		renderSystem,
 		collisionSystem,
 		inputSystem,
-		updateSystem,
 		enemyManager,
 		bulletManager,
 		scoreManager,
@@ -102,15 +100,19 @@ func NewGame(ctx context.Context) (*Game, error) {
 }
 
 func (g *Game) Update() error {
+	var currentTime time.Time
+	var deltaTime float64
+
 	select {
 	case <-g.ctx.Done():
 		return g.ctx.Err()
 	case err := <-g.errChan:
+		g.handleCriticalError(err)
 		g.Shutdown()
 		return fmt.Errorf("critical error occurred: %w", err)
 	default:
-		currentTime := time.Now()
-		deltaTime := currentTime.Sub(g.lastUpdateTime).Seconds()
+		currentTime = time.Now()
+		deltaTime = currentTime.Sub(g.lastUpdateTime).Seconds()
 		g.lastUpdateTime = currentTime
 
 		if deltaTime > maxDeltaTime {
@@ -156,15 +158,21 @@ func (g *Game) Run() {
 				case dt := <-g.updateChan:
 					if err := s.Update(dt); err != nil {
 						if err != context.Canceled {
-							log.Printf("Error running system: %v", err)
+							g.handleNonCriticalError(err)
 						}
-						g.handleCriticalError(err)
-						return
 					}
 				}
 			}
 
 		}(sys)
+	}
+}
+
+func (g *Game) handleNonCriticalError(err error) {
+	select {
+	case g.errChan <- err:
+	default:
+		log.Printf("Non-critical error occurred: %v", err)
 	}
 }
 

@@ -33,9 +33,7 @@ func (rs *RenderSystem) Update(deltaTime float64) error {
 	case <-rs.CTX.Done():
 		return rs.CTX.Err()
 	default:
-		rs.mu.Lock()
-		defer rs.mu.Unlock()
-		// il faut déterminer quoi mettre en place
+		// quoi faire si le contexte n'est pas terminé ?
 	}
 	return nil
 }

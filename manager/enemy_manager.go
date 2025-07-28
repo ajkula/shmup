@@ -2,7 +2,9 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
@@ -166,14 +168,28 @@ func (em *EnemyManager) RemoveFormation(formation types.Formation) {
 }
 
 func (em *EnemyManager) Shutdown() {
-	em.mu.Lock()
-	defer em.mu.Unlock()
-	for eventType, ch := range em.eventChannels {
-		em.eventManager.Unsubscribe(eventType, ch)
+	done := make(chan bool, 1)
+
+	go func() {
+		em.mu.Lock()
+		defer em.mu.Unlock()
+
+		for eventType, ch := range em.eventChannels {
+			em.eventManager.Unsubscribe(eventType, ch)
+		}
+		em.eventChannels = nil
+		em.enemies = nil
+		em.formations = nil
+
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		// noop
+	case <-time.After(time.Second):
+		fmt.Printf("Warning: EnemyManager shutdown timeout\n")
 	}
-	em.eventChannels = nil
-	em.enemies = nil
-	em.formations = nil
 }
 
 var _ core.System = (*EnemyManager)(nil)

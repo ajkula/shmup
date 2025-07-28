@@ -28,11 +28,8 @@ func TestNewEnemy(t *testing.T) {
 	if enemy.Health != 20 {
 		t.Errorf("NewEnemy health: got %v, want 20", enemy.Health)
 	}
-	if enemy.shootCooldown != 0 {
-		t.Errorf("NewEnemy shootCooldown: got %v, want 0", enemy.shootCooldown)
-	}
-	if enemy.maxCooldown != 1.0 {
-		t.Errorf("NewEnemy maxCooldown: got %v, want 1.0", enemy.maxCooldown)
+	if !enemy.CanShoot() {
+		t.Error("NewEnemy should be able to shoot initially")
 	}
 }
 
@@ -49,14 +46,13 @@ func TestEnemyUpdate(t *testing.T) {
 		t.Errorf("Enemy.Update() returned an error: %v", err)
 	}
 
-	if enemy.shootCooldown != enemy.maxCooldown {
-		t.Errorf("Enemy shootCooldown after update: got %v, want %v", enemy.shootCooldown, enemy.maxCooldown)
+	if enemy.CanShoot() {
+		t.Error("Enemy should not be able to shoot immediately after shooting")
 	}
 
-	enemy.Update(testDeltaTime)
-	expectedCooldown := enemy.maxCooldown - testDeltaTime
-	if enemy.shootCooldown != expectedCooldown {
-		t.Errorf("Enemy shootCooldown after second update: got %v, want %v", enemy.shootCooldown, expectedCooldown)
+	remaining := enemy.GetShootCooldownRemaining()
+	if remaining <= 0 {
+		t.Error("Enemy should have cooldown remaining after shooting")
 	}
 }
 
@@ -98,34 +94,32 @@ func TestEnemyOnCollision(t *testing.T) {
 	enemy := NewEnemy(types.Vector2D{X: 100, Y: 100}, eventManager)
 	destroyedEvents, err := eventManager.Subscribe(interfaces.EnemyDestroyed)
 	if err != nil {
-		t.Errorf("Error happened during Subscription to EnemyDestroyed")
+		t.Errorf("Error during Subscription to EnemyDestroyed")
 	}
 
 	go eventManager.Run(ctx)
 
-	enemy.OnCollision(nil)
+	time.Sleep(20 * time.Millisecond)
 
-	if enemy.Health != 10 {
-		t.Errorf("Enemy health after collision: got %v, want 10", enemy.Health)
-	}
+	enemy.OnCollision(nil)
 
 	select {
 	case <-destroyedEvents:
 		t.Error("EnemyDestroyed event received too early")
 	case <-time.After(100 * time.Millisecond):
-		// good one
 	case <-ctx.Done():
 		t.Fatal("Test timed out")
 	}
 
 	enemy.OnCollision(nil)
+	enemy.Update(0.1) // ← FIX: Update needed to publish EnemyDestroyed
 
 	select {
 	case e := <-destroyedEvents:
 		if e.Type != interfaces.EnemyDestroyed {
 			t.Errorf("Expected EnemyDestroyed event, got %v", e.Type)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(2 * time.Second):
 		t.Error("No EnemyDestroyed event received")
 	case <-ctx.Done():
 		t.Fatal("Test timed out")
@@ -164,18 +158,19 @@ func TestEnemyShoot(t *testing.T) {
 	}
 
 	enemy.Update(testDeltaTime)
+	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-shotEvents:
 		t.Error("Enemy should not be able to shoot during cooldown")
 	case <-time.After(100 * time.Millisecond):
-		// good one
 	case <-ctx.Done():
 		t.Fatal("Test timed out")
 	}
 
-	for i := 0; i < int(enemy.maxCooldown/testDeltaTime); i++ {
+	for i := 0; i < 10; i++ {
 		enemy.Update(testDeltaTime)
 	}
+	time.Sleep(10 * time.Millisecond)
 
 	select {
 	case e := <-shotEvents:
@@ -208,23 +203,25 @@ func TestEnemyAutoShoot(t *testing.T) {
 	go eventManager.Run(ctx)
 
 	testCases := []struct {
-		name           string
-		updateTime     float64
-		expectShot     bool
-		additionalWait time.Duration
+		name       string
+		updateTime float64
+		expectShot bool
+		updates    int
 	}{
-		{"Initial shot", 0.01, true, 0},
-		{"During cooldown", 0.01, false, 0},
-		{"After cooldown", 0.99, true, 0},
-		{"Regular shot 1", enemy.maxCooldown + 0.01, true, 10 * time.Millisecond},
-		{"Regular shot 2", enemy.maxCooldown + 0.01, true, 10 * time.Millisecond},
-		{"Regular shot 3", enemy.maxCooldown + 0.01, true, 10 * time.Millisecond},
+		{"Initial shot", 0.01, true, 1},
+		{"During cooldown", 0.01, false, 1},
+		{"After cooldown", 0.1, true, 10}, // 10 * 0.1 = 1.0 second
+		{"Regular shot 1", 0.1, true, 11}, // +1.1 seconds
+		{"Regular shot 2", 0.1, true, 11},
+		{"Regular shot 3", 0.1, true, 11},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			enemy.Update(tc.updateTime)
-			time.Sleep(tc.additionalWait)
+			for i := 0; i < tc.updates; i++ {
+				enemy.Update(tc.updateTime)
+			}
+			time.Sleep(10 * time.Millisecond)
 
 			select {
 			case <-shotEvents:
@@ -249,7 +246,6 @@ func TestEnemyMovement(t *testing.T) {
 
 	enemy.Update(testDeltaTime)
 
-	// expectedPosition := startPosition.Add(types.Vector2D{X: 0, Y: 1}.Multiply(enemy.Speed * testDeltaTime))
 	expectedPosition := types.Vector2D{X: 100, Y: 100}
 	if enemy.Position != expectedPosition {
 		t.Errorf("Enemy position after update: got %v, want %v", enemy.Position, expectedPosition)

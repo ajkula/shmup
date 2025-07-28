@@ -3,11 +3,12 @@ package system
 import (
 	"context"
 	"sync"
-	"time"
 
+	"github.com/ajkula/shmup/config"
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
+	// Add this line to import the package that contains the definition of interfaces.EntityMoved
 )
 
 const (
@@ -16,25 +17,27 @@ const (
 
 type CollisionSystem struct {
 	core.BaseSystem
-	collidables   []types.GameEntity
-	mu            sync.Mutex
-	accumulator   float64
-	lastCheckTime time.Time
+	quadtree      *Quadtree
 	eventManager  interfaces.EventManagerInterface
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
+	mu            sync.RWMutex
+}
+
+type CollisionData struct {
+	EntityA types.GameEntity
+	EntityB types.GameEntity
 }
 
 func NewCollisionSystem(eventManager interfaces.EventManagerInterface) *CollisionSystem {
+	worldBounds := Rect{0, 0, float64(config.Config.ScreenWidth), float64(config.Config.ScreenHeight)}
 	return &CollisionSystem{
-		collidables:   make([]types.GameEntity, 0),
-		lastCheckTime: time.Now(),
-		eventManager:  eventManager,
+		quadtree:     NewQuadtree(worldBounds, 4),
+		eventManager: eventManager,
 	}
 }
 
 func (cs *CollisionSystem) Initialize(ctx context.Context) error {
-	err := cs.BaseSystem.Initialize(ctx)
-	if err != nil {
+	if err := cs.BaseSystem.Initialize(ctx); err != nil {
 		return err
 	}
 
@@ -44,6 +47,7 @@ func (cs *CollisionSystem) Initialize(ctx context.Context) error {
 		interfaces.EnemyDestroyed,
 		interfaces.BossDefeated,
 		interfaces.PlayerDestroyed,
+		interfaces.EntityMoved,
 	}
 
 	cs.eventChannels = make(map[interfaces.EventType]<-chan interfaces.Event)
@@ -63,20 +67,8 @@ func (cs *CollisionSystem) Update(deltaTime float64) error {
 	case <-cs.CTX.Done():
 		return cs.CTX.Err()
 	default:
-		cs.mu.Lock()
-		defer cs.mu.Unlock()
-
-		currentTime := time.Now()
-		actualDeltaTime := currentTime.Sub(cs.lastCheckTime).Seconds()
-		cs.lastCheckTime = currentTime
-		cs.accumulator += actualDeltaTime
-
 		cs.processEvents()
-
-		for cs.accumulator >= fixedDeltaTime {
-			cs.CheckCollisions(fixedDeltaTime)
-			cs.accumulator -= fixedDeltaTime
-		}
+		cs.checkCollisions()
 	}
 	return nil
 }
@@ -89,64 +81,69 @@ func (cs *CollisionSystem) processEvents() {
 				cs.eventManager.Unsubscribe(eventType, ch)
 				continue
 			}
-			if entity, ok := evt.Data.(types.GameEntity); ok {
-				switch eventType {
-				case interfaces.BulletCreated:
-					cs.AddCollidable(entity)
-				default:
-					cs.RemoveCollidable(entity)
-				}
-			}
+			cs.handleEvent(eventType, evt)
 		default:
-			// nothing
+			// No events for this type
 		}
 	}
 }
 
-func (cs *CollisionSystem) Run(ctx context.Context) error {
-	return cs.BaseSystem.Run(ctx)
-}
+func (cs *CollisionSystem) handleEvent(eventType interfaces.EventType, evt interfaces.Event) {
+	entity, ok := evt.Data.(types.GameEntity)
+	if !ok {
+		return
+	}
 
-func (cs *CollisionSystem) Shutdown() {
-	cs.collidables = nil
-}
-
-func (cs *CollisionSystem) AddCollidable(c types.GameEntity) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
-	cs.collidables = append(cs.collidables, c)
-}
 
-func (cs *CollisionSystem) RemoveCollidable(c types.GameEntity) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	for i, collidable := range cs.collidables {
-		if collidable == c {
-			cs.collidables = append(cs.collidables[:i], cs.collidables[i+1:]...)
-			break
-		}
+	switch eventType {
+	case interfaces.BulletCreated, interfaces.EntityMoved:
+		cs.quadtree.Insert(entity)
+	case interfaces.BulletDestroyed, interfaces.EnemyDestroyed, interfaces.BossDefeated, interfaces.PlayerDestroyed:
+		cs.quadtree.Remove(entity)
 	}
 }
 
-func (cs *CollisionSystem) CheckCollisions(deltaTime float64) {
-	for i := 0; i < len(cs.collidables); i++ {
-		for j := i + 1; j < len(cs.collidables); j++ {
-			if cs.collidables[i].CanCollideWith(cs.collidables[j]) {
-				if cs.detectCollision(cs.collidables[i], cs.collidables[j]) {
-					cs.collidables[i].OnCollision(cs.collidables[j])
-					cs.collidables[j].OnCollision(cs.collidables[i])
-				}
+func (cs *CollisionSystem) checkCollisions() {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	entities := cs.quadtree.GetAllEntities()
+	for _, entity := range entities {
+		bounds := cs.getEntityBounds(entity)
+		potentialCollisions := cs.quadtree.Query(bounds)
+
+		for _, other := range potentialCollisions {
+			if entity == other {
+				continue
+			}
+			if entity.CanCollideWith(other) && cs.detectCollision(entity, other) {
+				entity.OnCollision(other)
+				other.OnCollision(entity)
+
+				// Publier un événement de collision
+				cs.eventManager.Publish(interfaces.CollisionEvent, CollisionData{EntityA: entity, EntityB: other})
 			}
 		}
 	}
 }
 
-func (cs *CollisionSystem) detectCollision(a, b types.Entity) bool {
+func (cs *CollisionSystem) getEntityBounds(entity types.GameEntity) Rect {
+	x, y, w, h := entity.GetCollisionBox()
+	return Rect{x, y, w, h}
+}
+
+func (cs *CollisionSystem) detectCollision(a, b types.GameEntity) bool {
 	ax, ay, aw, ah := a.GetCollisionBox()
 	bx, by, bw, bh := b.GetCollisionBox()
 
-	return ax < bx+bw &&
-		ax+aw > bx &&
-		ay < by+bh &&
-		ay+ah > by
+	return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by
+}
+
+func (cs *CollisionSystem) Shutdown() {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	// Clear the quadtree and close any channels if necessary
+	cs.quadtree = nil
 }

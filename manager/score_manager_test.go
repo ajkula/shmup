@@ -44,17 +44,25 @@ func TestScoreManagerInitialize(t *testing.T) {
 func TestScoreManagerUpdate(t *testing.T) {
 	eventManager := mocks.NewMockEventManager()
 	sm := NewScoreManager(eventManager)
-	ctx := context.Background()
-	sm.Initialize(ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := sm.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Failed to initialize ScoreManager: %v", err)
+	}
+
+	go eventManager.Run(ctx)
 
 	eventManager.Publish(interfaces.ScoreEvent, 100)
 
-	err := sm.Update(0.16)
-	if err != nil {
-		t.Fatalf("Update returned an error: %v", err)
+	for i := 0; i < 10; i++ {
+		sm.Update(0.16)
+		if sm.GetScore() == 100 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-
-	time.Sleep(10 * time.Millisecond)
 
 	if sm.GetScore() != 100 {
 		t.Errorf("Expected score to be 100, got %d", sm.GetScore())
@@ -111,6 +119,8 @@ func TestScoreManagerConcurrency(t *testing.T) {
 		t.Fatalf("Failed to initialize ScoreManager: %v", err)
 	}
 
+	go eventManager.Run(ctx)
+
 	const numOperations = 1000
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -119,6 +129,7 @@ func TestScoreManagerConcurrency(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < numOperations; i++ {
 			eventManager.Publish(interfaces.ScoreEvent, 1)
+			time.Sleep(time.Microsecond)
 		}
 	}()
 
@@ -126,23 +137,32 @@ func TestScoreManagerConcurrency(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < numOperations; i++ {
 			sm.Update(0.16)
+			time.Sleep(time.Microsecond)
 		}
 	}()
 
 	wg.Wait()
 
-	for i := 0; i < 10; i++ {
-		sm.Update(0.16)
-	}
+	timeout := time.After(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 
 	expectedScore := numOperations
-	actualScore := sm.GetScore()
-	t.Logf("Final score: %d", actualScore)
-	if actualScore != expectedScore {
-		t.Errorf("Expected score to be %d, got %d", expectedScore, actualScore)
+	for {
+		select {
+		case <-timeout:
+			actualScore := sm.GetScore()
+			if actualScore != expectedScore {
+				t.Errorf("Expected score to be %d, got %d", expectedScore, actualScore)
+			}
+			return
+		case <-ticker.C:
+			sm.Update(0.16)
+			if sm.GetScore() == expectedScore {
+				return
+			}
+		}
 	}
-
-	sm.Shutdown()
 }
 
 func TestScoreManagerShutdown(t *testing.T) {

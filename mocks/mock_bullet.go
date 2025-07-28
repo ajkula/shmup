@@ -1,8 +1,6 @@
 package mocks
 
 import (
-	"fmt"
-
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/testinterfaces"
 	"github.com/ajkula/shmup/types"
@@ -56,9 +54,7 @@ func (m *MockBullet) Destroy() {
 	if m.IsAlive() {
 		m.destroyCalled = true
 		m.Health = 0
-		fmt.Println(" **************** Will publish BulletDestroyed")
 		m.eventManager.Publish(interfaces.BulletDestroyed, m)
-		m.Health = -1
 	}
 }
 

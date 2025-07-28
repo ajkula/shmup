@@ -1,9 +1,8 @@
 package entity
 
 import (
-	"math"
+	"time"
 
-	"github.com/ajkula/shmup/common"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -11,8 +10,7 @@ import (
 
 type Enemy struct {
 	types.BaseEntity
-	shootCooldown float64
-	maxCooldown   float64
+	shootCooldown *ThreadSafeCooldown
 	eventManager  interfaces.EventManagerInterface
 }
 
@@ -24,16 +22,18 @@ func NewEnemy(position types.Vector2D, eventManager interfaces.EventManagerInter
 			Speed:  2,
 			Health: 20,
 		},
-		shootCooldown: 0,
-		maxCooldown:   1.0,
+		shootCooldown: NewThreadSafeCooldown(1.0), // 1.0 second like original
 		eventManager:  eventManager,
 	}
 }
 
 func (e *Enemy) Update(deltaTime float64) error {
-	e.shootCooldown = math.Max(0, e.shootCooldown-deltaTime)
+	e.shootCooldown.Update(deltaTime) // Update cooldown with deltaTime
 	if e.CanShoot() {
 		e.Shoot()
+	}
+	if e.Health <= 0 {
+		e.eventManager.Publish(interfaces.EnemyDestroyed, e)
 	}
 	return nil
 }
@@ -56,18 +56,31 @@ func (e *Enemy) CanCollideWith(other types.Entity) bool {
 func (e *Enemy) OnCollision(other types.Entity) {
 	e.TakeDamage(10)
 	e.eventManager.Publish(interfaces.EnemyDamaged, e)
-	if e.Health <= 0 {
-		e.eventManager.Publish(interfaces.EnemyDestroyed, e)
-	}
 }
 
 func (e *Enemy) CanShoot() bool {
-	return e.shootCooldown <= common.Epsilon
+	return e.shootCooldown.CanAct()
 }
 
-func (e *Enemy) Shoot() {
-	e.eventManager.Publish(interfaces.EnemyShot, e)
-	e.shootCooldown = e.maxCooldown
+func (e *Enemy) Shoot() bool {
+	if e.shootCooldown.TryAct() {
+		e.eventManager.Publish(interfaces.EnemyShot, e)
+		return true
+	}
+	return false
+}
+
+func (e *Enemy) GetShootCooldownRemaining() time.Duration {
+	return e.shootCooldown.GetRemainingCooldown()
+}
+
+func (e *Enemy) ResetShootCooldown() {
+	e.shootCooldown.Reset()
+}
+
+func (e *Enemy) SetShootRate(ratePerSecond float64) {
+	cooldownTime := 1.0 / ratePerSecond // Convert to seconds
+	e.shootCooldown.SetCooldownTime(cooldownTime)
 }
 
 var _ types.GameEntity = (*Enemy)(nil)

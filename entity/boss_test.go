@@ -26,8 +26,8 @@ func TestNewBoss(t *testing.T) {
 	if boss.Health != 1000 {
 		t.Errorf("NewBoss health: got %v, want 1000", boss.Health)
 	}
-	if boss.ShootCooldown != 0 {
-		t.Errorf("NewBoss shootCooldown: got %v, want 0", boss.ShootCooldown)
+	if !boss.CanShoot() {
+		t.Error("NewBoss should be able to shoot initially")
 	}
 }
 
@@ -35,14 +35,22 @@ func TestBossUpdate(t *testing.T) {
 	eventManager := mocks.NewMockEventManager()
 	boss := NewBoss(types.Vector2D{X: 100, Y: 100}, eventManager)
 
-	boss.ShootCooldown = 0.2
+	if !boss.CanShoot() {
+		t.Error("Boss should be able to shoot initially")
+	}
+
 	err := boss.Update(0.1)
 	if err != nil {
 		t.Errorf("Boss.Update() returned an error: %v", err)
 	}
 
-	if boss.ShootCooldown != 0.1 {
-		t.Errorf("Boss.ShootCooldown after update: got %v, want 0.1", boss.ShootCooldown)
+	if boss.CanShoot() {
+		t.Error("Boss should not be able to shoot immediately after shooting")
+	}
+
+	remaining := boss.GetShootCooldownRemaining()
+	if remaining <= 0 {
+		t.Error("Boss should have cooldown remaining after shooting")
 	}
 }
 
@@ -123,7 +131,6 @@ func TestBossShoot(t *testing.T) {
 
 	go eventManager.Run(ctx)
 
-	// shoot initial
 	boss.Update(0.1)
 
 	select {
@@ -137,19 +144,17 @@ func TestBossShoot(t *testing.T) {
 		t.Fatal("Test timed out")
 	}
 
-	// ne peut pas tirer
 	boss.Update(0.1)
+	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-shotEvents:
 		t.Error("Boss should not be able to shoot during cooldown")
 	case <-time.After(100 * time.Millisecond):
-		// comportement attendu
 	case <-ctx.Done():
 		t.Fatal("Test timed out")
 	}
 
-	// attend que le cooldown soit terminé et vérifie que le boss peut tirer à nouveau
-	time.Sleep(200 * time.Millisecond)
+	// Update enough times to clear cooldown (0.2 / 0.1 = 2 updates)
 	boss.Update(0.1)
 
 	select {
@@ -183,23 +188,25 @@ func TestBossAutoShoot(t *testing.T) {
 	go eventManager.Run(ctx)
 
 	testCases := []struct {
-		name           string
-		updateTime     float64
-		expectShot     bool
-		additionalWait time.Duration
+		name       string
+		updateTime float64
+		expectShot bool
+		updates    int
 	}{
-		{"Initial shot", 0.01, true, 0},
-		{"During cooldown", 0.01, false, 0},
-		{"After cooldown", 0.19, true, 0},
-		{"Regular shot 1", boss.maxCooldown + 0.01, true, 10 * time.Millisecond},
-		{"Regular shot 2", boss.maxCooldown + 0.01, true, 10 * time.Millisecond},
-		{"Regular shot 3", boss.maxCooldown + 0.01, true, 10 * time.Millisecond},
+		{"Initial shot", 0.01, true, 1},
+		{"During cooldown", 0.01, false, 1},
+		{"After cooldown", 0.1, true, 2}, // 2 * 0.1 = 0.2 second
+		{"Regular shot 1", 0.1, true, 3}, // +0.3 seconds (>0.2)
+		{"Regular shot 2", 0.1, true, 3},
+		{"Regular shot 3", 0.1, true, 3},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			boss.Update(tc.updateTime)
-			time.Sleep(tc.additionalWait)
+			for i := 0; i < tc.updates; i++ {
+				boss.Update(tc.updateTime)
+			}
+			time.Sleep(10 * time.Millisecond)
 
 			select {
 			case <-shotEvents:
@@ -240,8 +247,8 @@ func TestBossPhaseChange(t *testing.T) {
 	shotsNeeded := (initialHealth-500)/damagePerShot + 1
 
 	for i := 1; i < shotsNeeded; i++ {
-		boss.OnCollision(nil) // hit
-		boss.Update(0.1)      // shoot > boss update
+		boss.OnCollision(nil)
+		boss.Update(0.1)
 
 		if i < shotsNeeded-1 {
 			select {

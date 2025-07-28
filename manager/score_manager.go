@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
@@ -11,11 +13,14 @@ import (
 
 type ScoreManager struct {
 	core.BaseSystem
-	score         int
-	highScore     int
+	score         int64
+	highScore     int64
 	eventManager  interfaces.EventManagerInterface
 	mu            sync.RWMutex
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
+	shutdownCh    chan struct{}
+	wg            sync.WaitGroup
+	isShutdown    int32
 }
 
 func NewScoreManager(eventManager interfaces.EventManagerInterface) *ScoreManager {
@@ -24,6 +29,7 @@ func NewScoreManager(eventManager interfaces.EventManagerInterface) *ScoreManage
 		highScore:     0,
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
+		shutdownCh:    make(chan struct{}),
 	}
 }
 
@@ -38,6 +44,9 @@ func (sm *ScoreManager) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to ScoreEvent: %w", err)
 	}
 
+	sm.wg.Add(1)
+	go sm.eventProcessor()
+
 	return nil
 }
 
@@ -46,25 +55,50 @@ func (sm *ScoreManager) Update(deltaTime float64) error {
 	case <-sm.CTX.Done():
 		return sm.CTX.Err()
 	default:
-		sm.processEvents()
 		return nil
 	}
 }
 
-func (sm *ScoreManager) processEvents() {
-	for eventType, ch := range sm.eventChannels {
+func (sm *ScoreManager) eventProcessor() {
+	defer sm.wg.Done()
+
+	for {
+		select {
+		case <-sm.CTX.Done():
+			return
+		case <-sm.shutdownCh:
+			return
+		default:
+			sm.processAllAvailableEvents()
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func (sm *ScoreManager) processAllAvailableEvents() {
+	sm.mu.RLock()
+	channels := make(map[interfaces.EventType]<-chan interfaces.Event)
+	for k, v := range sm.eventChannels {
+		channels[k] = v
+	}
+	sm.mu.RUnlock()
+
+	for eventType, ch := range channels {
 		for {
 			select {
 			case evt, ok := <-ch:
 				if !ok {
-					return
+					sm.mu.Lock()
+					delete(sm.eventChannels, eventType)
+					sm.mu.Unlock()
+					goto nextChannel
 				}
 				sm.handleEvent(eventType, evt)
 			default:
-				// no more events
-				return
+				goto nextChannel
 			}
 		}
+	nextChannel:
 	}
 }
 
@@ -78,43 +112,51 @@ func (sm *ScoreManager) handleEvent(eventType interfaces.EventType, evt interfac
 }
 
 func (sm *ScoreManager) AddScore(points int) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.score += points
-	if sm.score > sm.highScore {
-		sm.highScore = sm.score
+	newScore := atomic.AddInt64(&sm.score, int64(points))
+
+	for {
+		currentHigh := atomic.LoadInt64(&sm.highScore)
+		if newScore <= currentHigh {
+			break
+		}
+		if atomic.CompareAndSwapInt64(&sm.highScore, currentHigh, newScore) {
+			break
+		}
 	}
 }
 
 func (sm *ScoreManager) GetScore() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.score
+	return int(atomic.LoadInt64(&sm.score))
 }
 
 func (sm *ScoreManager) GetHighScore() int {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.highScore
+	return int(atomic.LoadInt64(&sm.highScore))
 }
 
 func (sm *ScoreManager) ResetScore() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.score = 0
-	sm.eventManager.Publish(interfaces.ScoreEvent, sm.score)
+	atomic.StoreInt64(&sm.score, 0)
+	sm.eventManager.Publish(interfaces.ScoreEvent, 0)
 	fmt.Println("Score reset")
 }
 
 func (sm *ScoreManager) Shutdown() {
+	if !atomic.CompareAndSwapInt32(&sm.isShutdown, 0, 1) {
+		return
+	}
+
+	close(sm.shutdownCh)
+	sm.wg.Wait()
+
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 	for eventType, ch := range sm.eventChannels {
 		sm.eventManager.Unsubscribe(eventType, ch)
 	}
 	sm.eventChannels = nil
-	sm.score = 0
-	sm.highScore = 0
+	sm.mu.Unlock()
+
+	atomic.StoreInt64(&sm.score, 0)
+	atomic.StoreInt64(&sm.highScore, 0)
+
 	fmt.Println("ScoreManager shut down")
 }
 

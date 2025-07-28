@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
@@ -11,11 +12,14 @@ import (
 
 type LevelManager struct {
 	core.BaseSystem
-	currentLevel  int
+	currentLevel  int64
 	difficulty    float64
 	eventManager  interfaces.EventManagerInterface
 	mu            sync.RWMutex
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
+	shutdownCh    chan struct{}
+	wg            sync.WaitGroup
+	isShutdown    int32
 }
 
 func NewLevelManager(eventManager interfaces.EventManagerInterface) *LevelManager {
@@ -24,6 +28,7 @@ func NewLevelManager(eventManager interfaces.EventManagerInterface) *LevelManage
 		difficulty:    1.0,
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
+		shutdownCh:    make(chan struct{}),
 	}
 }
 
@@ -45,6 +50,9 @@ func (lm *LevelManager) Initialize(ctx context.Context) error {
 		lm.eventChannels[eventType] = ch
 	}
 
+	lm.wg.Add(1)
+	go lm.eventProcessor()
+
 	return nil
 }
 
@@ -53,25 +61,43 @@ func (lm *LevelManager) Update(deltaTime float64) error {
 	case <-lm.CTX.Done():
 		return lm.CTX.Err()
 	default:
-		lm.processEvents()
+		// noop
 		return nil
 	}
 }
 
-func (lm *LevelManager) processEvents() {
+func (lm *LevelManager) eventProcessor() {
+	defer lm.wg.Done()
+
+	for {
+		select {
+		case <-lm.CTX.Done():
+			return
+		case <-lm.shutdownCh:
+			return
+		default:
+			lm.processAllAvailableEvents()
+		}
+	}
+}
+
+func (lm *LevelManager) processAllAvailableEvents() {
 	for eventType, ch := range lm.eventChannels {
 		for {
 			select {
 			case evt, ok := <-ch:
 				if !ok {
+					lm.mu.Lock()
+					delete(lm.eventChannels, eventType)
+					lm.mu.Unlock()
 					return
 				}
 				lm.handleEvent(eventType, evt)
 			default:
-				// finished
-				return
+				goto nextChannel
 			}
 		}
+	nextChannel:
 	}
 }
 
@@ -86,32 +112,42 @@ func (lm *LevelManager) handleEvent(eventType interfaces.EventType, evt interfac
 
 func (lm *LevelManager) AdvanceLevel(levels int) {
 	lm.mu.Lock()
-	defer lm.mu.Unlock()
-	lm.currentLevel += levels
+	newLevel := atomic.AddInt64(&lm.currentLevel, int64(levels))
 	lm.difficulty += float64(levels) * 0.1
-	lm.eventManager.Publish(interfaces.LevelEvent, lm.currentLevel)
+	lm.mu.Unlock()
+
+	err := lm.eventManager.Publish(interfaces.LevelChanged, int(newLevel))
+	if err != nil {
+		fmt.Printf("Failed to publish LevelChanged: %v\n", err)
+	}
 }
 
 func (lm *LevelManager) GetLevel() int {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
-	return lm.currentLevel
+	return int(atomic.LoadInt64(&lm.currentLevel))
 }
 
 func (lm *LevelManager) GetDifficulty() float64 {
-	lm.mu.Lock()
-	defer lm.mu.Unlock()
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
 	return lm.difficulty
 }
 
 func (lm *LevelManager) Shutdown() {
+	if !atomic.CompareAndSwapInt32(&lm.isShutdown, 0, 1) {
+		return
+	}
+
+	close(lm.shutdownCh)
+	lm.wg.Wait()
+
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 	for eventType, ch := range lm.eventChannels {
 		lm.eventManager.Unsubscribe(eventType, ch)
 	}
 	lm.eventChannels = nil
-	lm.currentLevel = 1
+
+	atomic.StoreInt64(&lm.currentLevel, 1)
 	lm.difficulty = 1.0
 }
 
