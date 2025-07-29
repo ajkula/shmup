@@ -12,13 +12,20 @@ import (
 type InputSystem struct {
 	core.BaseSystem
 	eventManager interfaces.EventManagerInterface
-	accumulator  float64
+}
+
+type InputState struct {
+	Left  bool
+	Right bool
+	Up    bool
+	Down  bool
+	Shoot bool
+	Pause bool
 }
 
 func NewInputSystem(eventManager interfaces.EventManagerInterface) *InputSystem {
 	return &InputSystem{
 		eventManager: eventManager,
-		accumulator:  0,
 	}
 }
 
@@ -32,31 +39,43 @@ func (is *InputSystem) Update(deltaTime float64) error {
 	case <-is.CTX.Done():
 		return is.CTX.Err()
 	default:
-		is.accumulator += deltaTime
-
-		for is.accumulator >= fixedDeltaTime {
-			is.processInput()
-			is.accumulator -= fixedDeltaTime
-		}
+		is.processInput(deltaTime)
 	}
 	return nil
 }
 
-func (is *InputSystem) processInput() {
+func (is *InputSystem) processInput(deltaTime float64) {
+	// long press
+	inputState := InputState{
+		Left:  ebiten.IsKeyPressed(ebiten.KeyLeft) || ebiten.IsKeyPressed(ebiten.KeyA),
+		Right: ebiten.IsKeyPressed(ebiten.KeyRight) || ebiten.IsKeyPressed(ebiten.KeyD),
+		Up:    ebiten.IsKeyPressed(ebiten.KeyUp) || ebiten.IsKeyPressed(ebiten.KeyW),
+		Down:  ebiten.IsKeyPressed(ebiten.KeyDown) || ebiten.IsKeyPressed(ebiten.KeyS),
+		Shoot: ebiten.IsKeyPressed(ebiten.KeySpace),
+		Pause: inpututil.IsKeyJustPressed(ebiten.KeyP),
+	}
+
+	if inputState.Left || inputState.Right || inputState.Up || inputState.Down {
+		is.eventManager.Publish(interfaces.InputEvent, map[string]interface{}{
+			"type":       "movement",
+			"left":       inputState.Left,
+			"right":      inputState.Right,
+			"up":         inputState.Up,
+			"down":       inputState.Down,
+			"delta_time": deltaTime,
+		})
+	}
+
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		is.eventManager.Publish(interfaces.InputEvent, "shoot")
+		is.eventManager.Publish(interfaces.InputEvent, map[string]interface{}{
+			"type": "shoot",
+		})
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) {
-		is.eventManager.Publish(interfaces.InputEvent, "up")
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowDown) {
-		is.eventManager.Publish(interfaces.InputEvent, "down")
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowLeft) {
-		is.eventManager.Publish(interfaces.InputEvent, "left")
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyArrowRight) {
-		is.eventManager.Publish(interfaces.InputEvent, "right")
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
+		is.eventManager.Publish(interfaces.InputEvent, map[string]interface{}{
+			"type": "pause",
+		})
 	}
 }
 

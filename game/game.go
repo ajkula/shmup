@@ -11,6 +11,8 @@ import (
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/entity"
 	"github.com/ajkula/shmup/event"
+	"github.com/ajkula/shmup/graphics"
+	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/manager"
 	"github.com/ajkula/shmup/state"
 	"github.com/ajkula/shmup/system"
@@ -24,70 +26,85 @@ const (
 )
 
 type Game struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	systems        []core.System
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// sync
+	inputSystem  *system.InputSystem
+	renderSystem *system.RenderSystem
+
+	// concurrents
+	concurrentSystems []core.System
+
+	player         *entity.Player
 	lastUpdateTime time.Time
 	accumulator    float64
-	player         *entity.Player
 	wg             sync.WaitGroup
-	updateChan     chan float64
 	errChan        chan error
+	eventManager   interfaces.EventManagerInterface
 }
 
 func NewGame(ctx context.Context) (*Game, error) {
 	gameCtx, cancel := context.WithCancel(ctx)
 
+	// EventManager - sera concurrent
 	eventManager := event.NewEventManager()
 	if err := eventManager.Initialize(gameCtx); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to initialize event manager: %w", err)
 	}
-	stateManager := state.NewStateManager(eventManager)
 
 	g := &Game{
-		ctx:            gameCtx,
-		cancel:         cancel,
-		systems:        make([]core.System, 0),
-		lastUpdateTime: time.Now(),
-		accumulator:    0,
-		updateChan:     make(chan float64, 1),
-		errChan:        make(chan error, 10),
+		ctx:               gameCtx,
+		cancel:            cancel,
+		lastUpdateTime:    time.Now(),
+		accumulator:       0,
+		errChan:           make(chan error, 10),
+		eventManager:      eventManager,
+		concurrentSystems: make([]core.System, 0),
 	}
 
-	// initialize systems
-	renderSystem := system.NewRenderSystem()
-	collisionSystem := system.NewCollisionSystem(eventManager)
-	inputSystem := system.NewInputSystem(eventManager)
+	// Systèmes SYNCHRONES (appelés par Ebiten)
+	g.inputSystem = system.NewInputSystem(eventManager)
+	g.renderSystem = system.NewRenderSystem()
 
-	// initialize managers
+	// Initialize synchronous systems
+	if err := g.inputSystem.Initialize(gameCtx); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to initialize input system: %w", err)
+	}
+	if err := g.renderSystem.Initialize(gameCtx); err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to initialize render system: %w", err)
+	}
+
+	// Systèmes CONCURRENTS (tournent en arrière-plan)
+	stateManager := state.NewStateManager(eventManager)
+	collisionSystem := system.NewCollisionSystem(eventManager)
 	enemyManager := manager.NewEnemyManager(eventManager)
 	bulletManager := manager.NewBulletManager(eventManager)
 	scoreManager := manager.NewScoreManager(eventManager)
 	levelManager := manager.NewLevelManager(eventManager)
 
-	// add all systems and managers to the game
-	g.systems = append(g.systems,
-		eventManager,
+	g.concurrentSystems = append(g.concurrentSystems,
+		eventManager, // EventManager tourne en concurrent
 		stateManager,
-		renderSystem,
 		collisionSystem,
-		inputSystem,
 		enemyManager,
 		bulletManager,
 		scoreManager,
 		levelManager,
 	)
 
-	// initialize all systems
-	for _, sys := range g.systems {
+	// Initialize concurrent systems
+	for _, sys := range g.concurrentSystems {
 		if err := sys.Initialize(gameCtx); err != nil {
 			cancel()
-			return nil, fmt.Errorf("failed to initialize system: %w", err)
+			return nil, fmt.Errorf("failed to initialize concurrent system: %w", err)
 		}
 	}
 
-	// create player
+	// Create player
 	g.player = entity.NewPlayer(
 		types.Vector2D{
 			X: float64(config.Config.ScreenWidth / 2),
@@ -96,101 +113,127 @@ func NewGame(ctx context.Context) (*Game, error) {
 		eventManager,
 	)
 
+	// Add player to render system
+	g.renderSystem.AddEntity(g.player)
+
+	// Add some test enemies to see sprites
+	enemy1 := entity.NewEnemyWithType(
+		types.Vector2D{X: 100, Y: 50},
+		eventManager,
+		graphics.Scout,
+		graphics.Level1,
+	)
+	enemy2 := entity.NewEnemyWithType(
+		types.Vector2D{X: 200, Y: 80},
+		eventManager,
+		graphics.Scout,
+		graphics.Level2,
+	)
+	enemy3 := entity.NewEnemyWithType(
+		types.Vector2D{X: 300, Y: 50},
+		eventManager,
+		graphics.Fighter,
+		graphics.Level1,
+	)
+	enemy4 := entity.NewEnemyWithType(
+		types.Vector2D{X: 400, Y: 80},
+		eventManager,
+		graphics.Heavy,
+		graphics.Level1,
+	)
+
+	g.renderSystem.AddEntity(enemy1)
+	g.renderSystem.AddEntity(enemy2)
+	g.renderSystem.AddEntity(enemy3)
+	g.renderSystem.AddEntity(enemy4)
+
+	g.startConcurrentSystems()
+
 	return g, nil
 }
 
 func (g *Game) Update() error {
-	var currentTime time.Time
-	var deltaTime float64
+	select {
+	case err := <-g.errChan:
+		log.Printf("Concurrent system error: %v", err)
+	default:
+	}
 
 	select {
 	case <-g.ctx.Done():
 		return g.ctx.Err()
-	case err := <-g.errChan:
-		g.handleCriticalError(err)
-		g.Shutdown()
-		return fmt.Errorf("critical error occurred: %w", err)
 	default:
-		currentTime = time.Now()
-		deltaTime = currentTime.Sub(g.lastUpdateTime).Seconds()
-		g.lastUpdateTime = currentTime
+	}
 
-		if deltaTime > maxDeltaTime {
-			deltaTime = maxDeltaTime
+	// Calculate delta time
+	currentTime := time.Now()
+	deltaTime := currentTime.Sub(g.lastUpdateTime).Seconds()
+	g.lastUpdateTime = currentTime
+
+	if deltaTime > maxDeltaTime {
+		deltaTime = maxDeltaTime
+	}
+
+	g.accumulator += deltaTime
+
+	// Fixed timestep updates
+	for g.accumulator >= fixedDeltaTime {
+		// Update synchronous systems
+		if err := g.inputSystem.Update(fixedDeltaTime); err != nil {
+			return fmt.Errorf("input system error: %w", err)
 		}
 
-		g.accumulator += deltaTime
-
-		for g.accumulator >= fixedDeltaTime {
-			select {
-			case <-g.ctx.Done():
-				return g.ctx.Err()
-			default:
-				g.updateChan <- fixedDeltaTime
-				g.accumulator -= fixedDeltaTime
-			}
+		// Update player
+		if err := g.player.Update(fixedDeltaTime); err != nil {
+			return fmt.Errorf("player update error: %w", err)
 		}
+
+		g.accumulator -= fixedDeltaTime
 	}
 
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	if renderSystem, ok := g.systems[2].(*system.RenderSystem); ok {
-		renderSystem.Render(screen)
-	}
+	// Clear screen to black
+	screen.Fill(config.Config.BackgroundColor)
+
+	g.renderSystem.Render(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
 	return config.Config.ScreenWidth, config.Config.ScreenHeight
 }
 
-func (g *Game) Run() {
-	g.wg.Add(len(g.systems))
-	for _, sys := range g.systems {
-		go func(s core.System) {
-			defer g.wg.Done()
-
-			for {
-				select {
-				case <-g.ctx.Done():
-					return
-				case dt := <-g.updateChan:
-					if err := s.Update(dt); err != nil {
-						if err != context.Canceled {
-							g.handleNonCriticalError(err)
-						}
-					}
-				}
-			}
-
-		}(sys)
+func (g *Game) startConcurrentSystems() {
+	for _, sys := range g.concurrentSystems {
+		g.wg.Add(1)
+		go g.runConcurrentSystem(sys)
 	}
 }
 
-func (g *Game) handleNonCriticalError(err error) {
-	select {
-	case g.errChan <- err:
-	default:
-		log.Printf("Non-critical error occurred: %v", err)
-	}
-}
+func (g *Game) runConcurrentSystem(sys core.System) {
+	defer g.wg.Done()
 
-func (g *Game) handleCriticalError(err error) {
-	select {
-	case g.errChan <- err:
-	default:
-		log.Printf("Critical error occurred but error channel is full: %v", err)
+	if err := sys.Run(g.ctx); err != nil && err != context.Canceled {
+		select {
+		case g.errChan <- fmt.Errorf("concurrent system error: %w", err):
+		default:
+			log.Printf("Error channel full, logging: %v", err)
+		}
 	}
-	g.cancel()
 }
 
 func (g *Game) Shutdown() {
 	g.cancel()
-	for _, sys := range g.systems {
+	g.inputSystem.Shutdown()
+	g.renderSystem.Shutdown()
+
+	for _, sys := range g.concurrentSystems {
 		sys.Shutdown()
 	}
+
 	g.wg.Wait()
-	close(g.updateChan)
+
 	close(g.errChan)
 }

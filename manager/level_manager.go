@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
@@ -61,7 +62,7 @@ func (lm *LevelManager) Update(deltaTime float64) error {
 	case <-lm.CTX.Done():
 		return lm.CTX.Err()
 	default:
-		// noop
+		lm.processAllAvailableEvents()
 		return nil
 	}
 }
@@ -77,6 +78,7 @@ func (lm *LevelManager) eventProcessor() {
 			return
 		default:
 			lm.processAllAvailableEvents()
+			time.Sleep(16 * time.Millisecond) // ~60fps, prevent CPU burning
 		}
 	}
 }

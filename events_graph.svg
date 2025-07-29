@@ -92,7 +92,7 @@
     <!-- EventManager <-> Game -->
     <line x1="2000" y1="1800" x2="2000" y2="1150" stroke="#673AB7" stroke-width="3" marker-end="url(#arrowhead)" />
     <text x="2020" y="1500" fill="#673AB7" font-size="24">Subscribe: GameOver</text>
-    <text x="2020" y="1540" fill="#673AB7" font-size="24">Subscribe: LevelComplete</text>
+    <text x="2020" y="1540" fill="#673AB7" font-size="24">Subscribe: LevelChanged</text>
     
     <line x1="1980" y1="1150" x2="1980" y2="1800" stroke="#673AB7" stroke-width="3" marker-end="url(#arrowhead)" />
     <text x="1700" y="1500" fill="#673AB7" font-size="24">Publish: GameInitialized</text>

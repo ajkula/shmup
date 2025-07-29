@@ -18,7 +18,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Configurer la gestion des signaux pour une fermeture propre
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -33,6 +32,9 @@ func main() {
 
 	ebiten.SetWindowSize(config.Config.ScreenWidth, config.Config.ScreenHeight)
 	ebiten.SetWindowTitle("Shmup Game")
+
+	ebiten.SetTPS(60)
+	ebiten.SetVsyncEnabled(true)
 
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)

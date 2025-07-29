@@ -1,6 +1,7 @@
 package config
 
 import (
+	"image/color"
 	"os"
 	"strconv"
 )
@@ -18,6 +19,8 @@ type GameConfig struct {
 
 	MaxEventQueueSize int
 	MaxStateQueueSize int
+
+	BackgroundColor color.Color
 }
 
 var Config GameConfig
@@ -34,6 +37,7 @@ func Init() {
 		PowerUpSpawnChance: 0.1,
 		MaxEventQueueSize:  100,
 		MaxStateQueueSize:  10,
+		BackgroundColor:    color.RGBA{0, 0, 0, 255},
 	}
 }
 

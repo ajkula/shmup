@@ -1,6 +1,10 @@
 package entity
 
 import (
+	"image/color"
+
+	"github.com/ajkula/shmup/config"
+	"github.com/ajkula/shmup/graphics"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -10,28 +14,112 @@ type Player struct {
 	types.BaseEntity
 	ShootCooldown float64
 	eventManager  interfaces.EventManagerInterface
+
+	// Input event channel
+	inputEvents <-chan interfaces.Event
 }
 
 func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInterface) *Player {
-	return &Player{
+	inputChan, err := eventManager.Subscribe(interfaces.InputEvent)
+	if err != nil {
+		// Fallback: create a dummy channel if subscription fails
+		dummyChan := make(chan interfaces.Event, 1)
+		close(dummyChan)
+		inputChan = dummyChan
+	}
+
+	player := &Player{
 		BaseEntity: types.BaseEntity{
 			Position: position,
 			Width:    32, Height: 32,
-			Speed:  5,
+			Speed:  5, // Hardcoded pour les tests, sera overridé par config si disponible
 			Health: 100,
+			Color:  color.RGBA{0, 255, 0, 255}, // Vert pour le player
 		},
 		ShootCooldown: 0,
 		eventManager:  eventManager,
+		inputEvents:   inputChan,
 	}
+
+	// Override with config if available (for runtime)
+	if config.Config.PlayerSpeed > 0 {
+		player.Speed = config.Config.PlayerSpeed
+	}
+
+	return player
 }
 
 func (p *Player) Update(deltaTime float64) error {
+	// Réduire le cooldown de tir (peut devenir négatif pour les tests)
 	p.ShootCooldown -= deltaTime
+
+	// Traiter les événements d'input
+	p.processInputEvents()
+
+	// Garder le player dans les limites de l'écran
+	p.constrainToScreen()
+
 	return nil
 }
 
+func (p *Player) processInputEvents() {
+	for {
+		select {
+		case event := <-p.inputEvents:
+			if data, ok := event.Data.(map[string]interface{}); ok {
+				switch data["type"] {
+				case "movement":
+					p.handleMovement(data)
+				case "shoot":
+					p.Shoot()
+				}
+			}
+		default:
+			return // No more events
+		}
+	}
+}
+
+func (p *Player) handleMovement(data map[string]interface{}) {
+	deltaTime, ok := data["delta_time"].(float64)
+	if !ok {
+		return
+	}
+
+	moveSpeed := p.Speed * deltaTime * 60 // Normaliser pour 60fps
+
+	if left, ok := data["left"].(bool); ok && left {
+		p.Position.X -= moveSpeed
+	}
+	if right, ok := data["right"].(bool); ok && right {
+		p.Position.X += moveSpeed
+	}
+	if up, ok := data["up"].(bool); ok && up {
+		p.Position.Y -= moveSpeed
+	}
+	if down, ok := data["down"].(bool); ok && down {
+		p.Position.Y += moveSpeed
+	}
+}
+
+func (p *Player) constrainToScreen() {
+	if p.Position.X < 0 {
+		p.Position.X = 0
+	}
+	if p.Position.X > float64(config.Config.ScreenWidth)-p.Width {
+		p.Position.X = float64(config.Config.ScreenWidth) - p.Width
+	}
+	if p.Position.Y < 0 {
+		p.Position.Y = 0
+	}
+	if p.Position.Y > float64(config.Config.ScreenHeight)-p.Height {
+		p.Position.Y = float64(config.Config.ScreenHeight) - p.Height
+	}
+}
+
 func (p *Player) Draw(screen *ebiten.Image) {
-	// TODO
+	sprite := graphics.GetPlayerSprite(graphics.StandardFighter)
+	graphics.DrawSprite(screen, sprite, p.Position.X, p.Position.Y)
 }
 
 func (p *Player) CanCollideWith(other types.Entity) bool {

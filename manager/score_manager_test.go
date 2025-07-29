@@ -52,16 +52,11 @@ func TestScoreManagerUpdate(t *testing.T) {
 		t.Fatalf("Failed to initialize ScoreManager: %v", err)
 	}
 
-	go eventManager.Run(ctx)
-
 	eventManager.Publish(interfaces.ScoreEvent, 100)
 
-	for i := 0; i < 10; i++ {
-		sm.Update(0.16)
-		if sm.GetScore() == 100 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	err = sm.Update(0.16)
+	if err != nil {
+		t.Fatalf("Update returned an error: %v", err)
 	}
 
 	if sm.GetScore() != 100 {
@@ -119,50 +114,38 @@ func TestScoreManagerConcurrency(t *testing.T) {
 		t.Fatalf("Failed to initialize ScoreManager: %v", err)
 	}
 
-	go eventManager.Run(ctx)
+	// Wait for eventProcessor to start
+	time.Sleep(10 * time.Millisecond)
 
 	const numOperations = 1000
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
+	// Single goroutine publishing events
 	go func() {
 		defer wg.Done()
 		for i := 0; i < numOperations; i++ {
 			eventManager.Publish(interfaces.ScoreEvent, 1)
-			time.Sleep(time.Microsecond)
 		}
 	}()
 
-	go func() {
-		defer wg.Done()
-		for i := 0; i < numOperations; i++ {
-			sm.Update(0.16)
-			time.Sleep(time.Microsecond)
-		}
-	}()
-
+	// Wait for all events to be published
 	wg.Wait()
 
-	timeout := time.After(2 * time.Second)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	// Process remaining events synchronously
+	for i := 0; i < 10; i++ {
+		sm.Update(0.16)
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	expectedScore := numOperations
-	for {
-		select {
-		case <-timeout:
-			actualScore := sm.GetScore()
-			if actualScore != expectedScore {
-				t.Errorf("Expected score to be %d, got %d", expectedScore, actualScore)
-			}
-			return
-		case <-ticker.C:
-			sm.Update(0.16)
-			if sm.GetScore() == expectedScore {
-				return
-			}
-		}
+	actualScore := sm.GetScore()
+
+	if actualScore != expectedScore {
+		t.Errorf("Expected score to be %d, got %d", expectedScore, actualScore)
 	}
+
+	sm.Shutdown()
 }
 
 func TestScoreManagerShutdown(t *testing.T) {

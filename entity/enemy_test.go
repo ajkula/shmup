@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ajkula/shmup/graphics"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/mocks"
 	"github.com/ajkula/shmup/types"
@@ -19,15 +20,22 @@ func TestNewEnemy(t *testing.T) {
 	if enemy.Position.X != 100 || enemy.Position.Y != 200 {
 		t.Errorf("NewEnemy position: got (%v,%v), want (100,200)", enemy.Position.X, enemy.Position.Y)
 	}
-	if enemy.Width != 32 || enemy.Height != 32 {
-		t.Errorf("NewEnemy size: got (%v,%v), want (32,32)", enemy.Width, enemy.Height)
+
+	// Sprite system: 7 pixels * 4px = 28, 7 pixels * 4px = 28
+	if enemy.Width != 28 || enemy.Height != 28 {
+		t.Errorf("NewEnemy size: got (%v,%v), want (28,28)", enemy.Width, enemy.Height)
 	}
-	if enemy.Speed != 2 {
-		t.Errorf("NewEnemy speed: got %v, want 2", enemy.Speed)
+
+	// Scout Level1 stats: Speed = 3.0
+	if enemy.Speed != 3.0 {
+		t.Errorf("NewEnemy speed: got %v, want 3.0", enemy.Speed)
 	}
-	if enemy.Health != 20 {
-		t.Errorf("NewEnemy health: got %v, want 20", enemy.Health)
+
+	// Scout Level1 stats: HP = 1
+	if enemy.Health != 1 {
+		t.Errorf("NewEnemy health: got %v, want 1", enemy.Health)
 	}
+
 	if !enemy.CanShoot() {
 		t.Error("NewEnemy should be able to shoot initially")
 	}
@@ -70,14 +78,15 @@ func TestEnemyCanCollideWith(t *testing.T) {
 		t.Error("Enemy should not be able to collide with another Enemy")
 	}
 
+	// Updated: All bullets can collide with enemies now
 	friendlyBullet := NewBullet(0, 0, false, eventManager)
 	if !enemy.CanCollideWith(friendlyBullet) {
 		t.Error("Enemy should be able to collide with player Bullet")
 	}
 
 	enemyBullet := NewBullet(0, 0, true, eventManager)
-	if enemy.CanCollideWith(enemyBullet) {
-		t.Error("Enemy should not be able to collide with enemy Bullet")
+	if !enemy.CanCollideWith(enemyBullet) {
+		t.Error("Enemy should be able to collide with enemy Bullet (simplified logic)")
 	}
 }
 
@@ -97,29 +106,16 @@ func TestEnemyOnCollision(t *testing.T) {
 		t.Errorf("Error during Subscription to EnemyDestroyed")
 	}
 
-	go eventManager.Run(ctx)
-
-	time.Sleep(20 * time.Millisecond)
-
-	enemy.OnCollision(nil)
-
-	select {
-	case <-destroyedEvents:
-		t.Error("EnemyDestroyed event received too early")
-	case <-time.After(100 * time.Millisecond):
-	case <-ctx.Done():
-		t.Fatal("Test timed out")
-	}
-
-	enemy.OnCollision(nil)
-	enemy.Update(0.1) // ← FIX: Update needed to publish EnemyDestroyed
+	// Test collision with bullet (should damage but not destroy with 1 HP enemy)
+	bullet := NewBullet(100, 100, false, eventManager)
+	enemy.OnCollision(bullet)
 
 	select {
 	case e := <-destroyedEvents:
 		if e.Type != interfaces.EnemyDestroyed {
 			t.Errorf("Expected EnemyDestroyed event, got %v", e.Type)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Error("No EnemyDestroyed event received")
 	case <-ctx.Done():
 		t.Fatal("Test timed out")
@@ -142,8 +138,6 @@ func TestEnemyShoot(t *testing.T) {
 		t.Errorf("Error happened during Subscription to EnemyShot")
 	}
 
-	go eventManager.Run(ctx)
-
 	enemy.Update(testDeltaTime)
 
 	select {
@@ -158,7 +152,6 @@ func TestEnemyShoot(t *testing.T) {
 	}
 
 	enemy.Update(testDeltaTime)
-	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-shotEvents:
 		t.Error("Enemy should not be able to shoot during cooldown")
@@ -167,10 +160,10 @@ func TestEnemyShoot(t *testing.T) {
 		t.Fatal("Test timed out")
 	}
 
-	for i := 0; i < 10; i++ {
+	// Scout Level1 FireRate = 2.0, so need 2.0/0.1 = 20 updates to clear cooldown
+	for i := 0; i < 20; i++ {
 		enemy.Update(testDeltaTime)
 	}
-	time.Sleep(10 * time.Millisecond)
 
 	select {
 	case e := <-shotEvents:
@@ -200,8 +193,6 @@ func TestEnemyAutoShoot(t *testing.T) {
 		t.Errorf("Error happened during Subscription to EnemyShot")
 	}
 
-	go eventManager.Run(ctx)
-
 	testCases := []struct {
 		name       string
 		updateTime float64
@@ -210,10 +201,10 @@ func TestEnemyAutoShoot(t *testing.T) {
 	}{
 		{"Initial shot", 0.01, true, 1},
 		{"During cooldown", 0.01, false, 1},
-		{"After cooldown", 0.1, true, 10}, // 10 * 0.1 = 1.0 second
-		{"Regular shot 1", 0.1, true, 11}, // +1.1 seconds
-		{"Regular shot 2", 0.1, true, 11},
-		{"Regular shot 3", 0.1, true, 11},
+		{"After cooldown", 0.1, true, 20}, // 20 * 0.1 = 2.0 second (Scout Level1 FireRate)
+		{"Regular shot 1", 0.1, true, 21},
+		{"Regular shot 2", 0.1, true, 21},
+		{"Regular shot 3", 0.1, true, 21},
 	}
 
 	for _, tc := range testCases {
@@ -221,7 +212,6 @@ func TestEnemyAutoShoot(t *testing.T) {
 			for i := 0; i < tc.updates; i++ {
 				enemy.Update(tc.updateTime)
 			}
-			time.Sleep(10 * time.Millisecond)
 
 			select {
 			case <-shotEvents:
@@ -246,8 +236,53 @@ func TestEnemyMovement(t *testing.T) {
 
 	enemy.Update(testDeltaTime)
 
-	expectedPosition := types.Vector2D{X: 100, Y: 100}
+	// Enemy now moves down automatically: Y += Speed * deltaTime * 60
+	// Scout Level1 Speed = 3.0, so Y += 3.0 * 0.1 * 60 = 18
+	expectedPosition := types.Vector2D{X: 100, Y: 118}
 	if enemy.Position != expectedPosition {
 		t.Errorf("Enemy position after update: got %v, want %v", enemy.Position, expectedPosition)
+	}
+}
+
+func TestEnemyTypes(t *testing.T) {
+	eventManager := mocks.NewMockEventManager()
+
+	// Test different enemy types
+	scout := NewEnemyWithType(types.Vector2D{X: 0, Y: 0}, eventManager, graphics.Scout, graphics.Level1)
+	if scout.GetEnemyType() != graphics.Scout {
+		t.Error("Scout enemy type not set correctly")
+	}
+
+	fighter := NewEnemyWithType(types.Vector2D{X: 0, Y: 0}, eventManager, graphics.Fighter, graphics.Level1)
+	if fighter.GetEnemyType() != graphics.Fighter {
+		t.Error("Fighter enemy type not set correctly")
+	}
+
+	heavy := NewEnemyWithType(types.Vector2D{X: 0, Y: 0}, eventManager, graphics.Heavy, graphics.Level1)
+	if heavy.GetEnemyType() != graphics.Heavy {
+		t.Error("Heavy enemy type not set correctly")
+	}
+}
+
+func TestEnemyUpgrade(t *testing.T) {
+	eventManager := mocks.NewMockEventManager()
+	enemy := NewEnemyWithType(types.Vector2D{X: 0, Y: 0}, eventManager, graphics.Scout, graphics.Level1)
+
+	originalSpeed := enemy.Speed
+	originalHealth := enemy.Health
+
+	enemy.UpgradeLevel()
+
+	if enemy.GetEnemyLevel() != graphics.Level2 {
+		t.Error("Enemy level not upgraded correctly")
+	}
+
+	// Scout Level2 should have higher speed and HP
+	if enemy.Speed <= originalSpeed {
+		t.Error("Enemy speed should increase after upgrade")
+	}
+
+	if enemy.Health <= originalHealth {
+		t.Error("Enemy health should increase after upgrade")
 	}
 }

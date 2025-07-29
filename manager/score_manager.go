@@ -55,6 +55,7 @@ func (sm *ScoreManager) Update(deltaTime float64) error {
 	case <-sm.CTX.Done():
 		return sm.CTX.Err()
 	default:
+		sm.processAllAvailableEvents()
 		return nil
 	}
 }
@@ -70,7 +71,7 @@ func (sm *ScoreManager) eventProcessor() {
 			return
 		default:
 			sm.processAllAvailableEvents()
-			time.Sleep(time.Millisecond)
+			time.Sleep(16 * time.Millisecond) // ~60fps, prevent CPU burning
 		}
 	}
 }

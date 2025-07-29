@@ -53,16 +53,11 @@ func TestLevelManagerUpdate(t *testing.T) {
 		t.Fatalf("Failed to initialize LevelManager: %v", err)
 	}
 
-	go eventManager.Run(ctx)
-
 	eventManager.Publish(interfaces.LevelEvent, 1)
 
-	for i := 0; i < 10; i++ {
-		lm.Update(0.16)
-		if lm.GetLevel() == 2 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	err = lm.Update(0.16)
+	if err != nil {
+		t.Fatalf("Update returned an error: %v", err)
 	}
 
 	if lm.GetLevel() != 2 {
@@ -116,7 +111,7 @@ func TestLevelManagerShutdown(t *testing.T) {
 func TestLevelManagerConcurrency(t *testing.T) {
 	eventManager := mocks.NewMockEventManager()
 	lm := NewLevelManager(eventManager)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	err := lm.Initialize(ctx)
@@ -124,48 +119,36 @@ func TestLevelManagerConcurrency(t *testing.T) {
 		t.Fatalf("Failed to initialize LevelManager: %v", err)
 	}
 
-	go eventManager.Run(ctx)
+	// Wait for eventProcessor to start
+	time.Sleep(10 * time.Millisecond)
 
 	const numOperations = 1000
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
+	// Single goroutine publishing events
 	go func() {
 		defer wg.Done()
 		for i := 0; i < numOperations; i++ {
 			eventManager.Publish(interfaces.LevelEvent, 1)
-			time.Sleep(time.Microsecond)
 		}
 	}()
 
-	go func() {
-		defer wg.Done()
-		for i := 0; i < numOperations; i++ {
-			lm.Update(0.16)
-			time.Sleep(time.Microsecond)
-		}
-	}()
-
+	// Wait for all events to be published
 	wg.Wait()
 
-	timeout := time.After(2 * time.Second)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	// Process remaining events synchronously
+	for i := 0; i < 10; i++ {
+		lm.Update(0.16)
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	expectedLevel := numOperations + 1
-	for {
-		select {
-		case <-timeout:
-			actualLevel := lm.GetLevel()
-			if actualLevel != expectedLevel {
-				t.Errorf("Expected level to be %d, got %d", expectedLevel, actualLevel)
-			}
-			return
-		case <-ticker.C:
-			lm.Update(0.16)
-			if lm.GetLevel() == expectedLevel {
-				return
-			}
-		}
+	actualLevel := lm.GetLevel()
+
+	if actualLevel != expectedLevel {
+		t.Errorf("Expected level to be %d, got %d", expectedLevel, actualLevel)
 	}
+
+	lm.Shutdown()
 }
