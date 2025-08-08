@@ -2,9 +2,7 @@ package manager
 
 import (
 	"context"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/mocks"
@@ -114,28 +112,22 @@ func TestScoreManagerConcurrency(t *testing.T) {
 		t.Fatalf("Failed to initialize ScoreManager: %v", err)
 	}
 
-	// Wait for eventProcessor to start
-	time.Sleep(10 * time.Millisecond)
-
 	const numOperations = 1000
-	var wg sync.WaitGroup
-	wg.Add(1)
+	const batchSize = 50
 
-	// Single goroutine publishing events
-	go func() {
-		defer wg.Done()
-		for i := 0; i < numOperations; i++ {
-			eventManager.Publish(interfaces.ScoreEvent, 1)
+	for i := 0; i < numOperations; i++ {
+		eventManager.Publish(interfaces.ScoreEvent, 1)
+
+		if i%batchSize == 0 {
+			sm.Update(0.016)
 		}
-	}()
+	}
 
-	// Wait for all events to be published
-	wg.Wait()
-
-	// Process remaining events synchronously
-	for i := 0; i < 10; i++ {
-		sm.Update(0.16)
-		time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 100; i++ {
+		sm.Update(0.016)
+		if sm.GetScore() >= numOperations {
+			break
+		}
 	}
 
 	expectedScore := numOperations

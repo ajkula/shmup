@@ -1,11 +1,16 @@
 package interfaces
 
-import "context"
+import (
+	"context"
+
+	"github.com/ajkula/shmup/types"
+)
 
 type EventType int
 
 const (
-	CollisionEvent EventType = iota
+	SystemTick EventType = iota
+	CollisionEvent
 	InputEvent
 	GameStateChangeEvent
 	LevelEvent
@@ -29,6 +34,9 @@ const (
 	EnemyRemovedFromFormation
 	FormationCreated
 	FormationDestroyed
+	FormationStateChanged
+	WaveStarted
+	WaveCompleted
 	EntityMoved
 )
 
@@ -45,4 +53,19 @@ type EventManagerInterface interface {
 	Publish(eventType EventType, data any) error
 	Subscribe(eventType EventType) (<-chan Event, error)
 	Unsubscribe(eventType EventType, ch <-chan Event) error
+}
+
+type BulletData struct {
+	Position  types.Vector2D
+	Direction types.Vector2D
+	Speed     float64
+}
+
+type BulletPattern interface {
+	GenerateShots(shooterPos types.Vector2D, targetPos *types.Vector2D) []BulletData
+}
+
+type PatternShootEvent struct {
+	Shooter types.GameEntity
+	Pattern BulletPattern
 }

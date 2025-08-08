@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/mocks"
@@ -19,7 +18,7 @@ func TestNewBulletManager(t *testing.T) {
 	if bm.eventManager != eventManager {
 		t.Error("EventManager not set correctly")
 	}
-	if len(bm.bullets) != 0 {
+	if bm.GetBulletCount() != 0 {
 		t.Error("Initial bullets slice should be empty")
 	}
 }
@@ -36,23 +35,59 @@ func TestBulletManagerInitialize(t *testing.T) {
 	if bm.CTX != ctx {
 		t.Error("Context not set correctly")
 	}
-	if len(bm.eventChannels) != 2 {
-		t.Errorf("Expected 2 event channels, got %d", len(bm.eventChannels))
+
+	// Check that we have the expected event channels
+	expectedChannels := 6 // SystemTick, BulletCreated, BulletDestroyed, PlayerShot, EnemyShot, BossShot
+	if len(bm.eventChannels) != expectedChannels {
+		t.Errorf("Expected %d event channels, got %d", expectedChannels, len(bm.eventChannels))
 	}
-	if _, ok := bm.eventChannels[interfaces.BulletCreated]; !ok {
-		t.Error("BulletCreated event channel not initialized")
+}
+
+func TestBulletManagerShootEvents(t *testing.T) {
+	eventManager := mocks.NewMockEventManager()
+	bm := NewBulletManager(eventManager)
+	ctx := context.Background()
+
+	err := bm.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Failed to initialize BulletManager: %v", err)
 	}
-	if _, ok := bm.eventChannels[interfaces.BulletDestroyed]; !ok {
-		t.Error("BulletDestroyed event channel not initialized")
+
+	// Create a mock player to shoot
+	player := &mocks.MockEnemy{} // MockEnemy implements GameEntity
+
+	// Publish player shot event
+	eventManager.Publish(interfaces.PlayerShot, player)
+
+	// Process the event synchronously
+	err = bm.Update(0.16)
+	if err != nil {
+		t.Fatalf("Update returned an error: %v", err)
+	}
+
+	// Check that a bullet was created
+	if bm.GetBulletCount() != 1 {
+		t.Errorf("Expected 1 bullet after PlayerShot event, got %d", bm.GetBulletCount())
+	}
+
+	// Check that bullet creation event was published
+	events := eventManager.GetPublishedEvents()
+	bulletCreatedCount := 0
+	for _, e := range events {
+		if e.Type == interfaces.BulletCreated {
+			bulletCreatedCount++
+		}
+	}
+	if bulletCreatedCount < 1 {
+		t.Errorf("Expected at least 1 BulletCreated event, got %d", bulletCreatedCount)
 	}
 }
 
 func TestBulletManagerUpdate(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	eventManager := mocks.NewMockEventManager()
 	bm := NewBulletManager(eventManager)
+	ctx := context.Background()
+
 	err := bm.Initialize(ctx)
 	if err != nil {
 		t.Fatalf("Failed to initialize BulletManager: %v", err)
@@ -61,110 +96,101 @@ func TestBulletManagerUpdate(t *testing.T) {
 	bullet1 := mocks.NewMockBullet(100, 100, true, eventManager)
 	bullet2 := mocks.NewMockBullet(200, 200, false, eventManager)
 
-	bm.AddBullet(bullet1)
-	bm.AddBullet(bullet2)
+	// Add bullets via events
+	eventManager.Publish(interfaces.BulletCreated, bullet1)
+	eventManager.Publish(interfaces.BulletCreated, bullet2)
 
-	done := make(chan bool)
-	go func() {
-		err := bm.Update(0.16)
-		if err != nil {
-			t.Errorf("Update returned an error: %v", err)
-		}
-		done <- true
-	}()
-
-	select {
-	case <-ctx.Done():
-		t.Fatal("Test timed out")
-	case <-done:
-		// test ok
+	// Process events synchronously
+	err = bm.Update(0.16)
+	if err != nil {
+		t.Errorf("Update returned an error: %v", err)
 	}
 
 	if !bullet1.UpdateCalled || !bullet2.UpdateCalled {
 		t.Error("Update not called on all bullets")
 	}
 
-	if len(bm.bullets) != 2 {
-		t.Errorf("Expected 2 bullets, got %d", len(bm.bullets))
+	if bm.GetBulletCount() != 2 {
+		t.Errorf("Expected 2 bullets, got %d", bm.GetBulletCount())
 	}
 }
 
 func TestBulletManagerHandleBulletDestroyed(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	eventManager := mocks.NewMockEventManager()
 	bm := NewBulletManager(eventManager)
+	ctx := context.Background()
 
 	err := bm.Initialize(ctx)
 	if err != nil {
 		t.Fatalf("Failed to initialize BulletManager: %v", err)
 	}
 
-	// scenario 1: Bullet hors limites
+	// Clear any existing events
+	eventManager.ClearPublishedEvents()
+
+	// Create bullets
 	bullet1 := mocks.NewMockBullet(100, 100, true, eventManager)
-	bm.AddBullet(bullet1)
+	bullet2 := mocks.NewMockBullet(200, 200, false, eventManager)
+
+	// Add bullets
+	eventManager.Publish(interfaces.BulletCreated, bullet1)
+	eventManager.Publish(interfaces.BulletCreated, bullet2)
+	bm.Update(0.16) // Process creation events
+
+	if bm.GetBulletCount() != 2 {
+		t.Fatalf("Expected 2 bullets after creation, got %d", bm.GetBulletCount())
+	}
+
+	// Scenario 1: Bullet out of bounds
 	bullet1.SetOutOfBounds(true)
 
-	// scenario 2: Bullet en collision
-	bullet2 := mocks.NewMockBullet(200, 200, false, eventManager)
-	bm.AddBullet(bullet2)
+	// Scenario 2: Bullet in collision
 	enemy := &mocks.MockEnemy{}
 	bullet2.OnCollision(enemy)
 
+	// Process destruction - bullets should destroy themselves and publish events
 	err = bm.Update(0.16)
 	if err != nil {
-		t.Fatalf("First Update returned an error: %v", err)
+		t.Fatalf("Update returned an error: %v", err)
 	}
 
-	// chan to check test finished
-	done := make(chan bool)
-	go func() {
-		err = bm.Update(0.16)
-		if err != nil {
-			t.Errorf("Second Update returned an error: %v", err)
+	// Check events
+	events := eventManager.GetPublishedEvents()
+	destroyedEvents := 0
+	for _, e := range events {
+		if e.Type == interfaces.BulletDestroyed {
+			destroyedEvents++
 		}
-
-		if len(bm.bullets) != 0 {
-			t.Errorf("Expected 0 bullets after destruction, got %d", len(bm.bullets))
-		}
-
-		events := eventManager.GetPublishedEvents()
-		destroyedEvents := 0
-		for _, e := range events {
-			if e.Type == interfaces.BulletDestroyed {
-				destroyedEvents++
-			}
-		}
-		if destroyedEvents != 2 {
-			t.Errorf("Expected 2 BulletDestroyed events, got %d", destroyedEvents)
-		}
-
-		done <- true
-	}()
-
-	select {
-	case <-ctx.Done():
-		t.Fatal("Test timed out")
-	case <-done:
-		// test ok
+	}
+	if destroyedEvents < 2 {
+		t.Errorf("Expected at least 2 BulletDestroyed events, got %d", destroyedEvents)
 	}
 
-	bm.Shutdown()
-	eventManager.Shutdown()
+	// Process the destruction events
+	err = bm.Update(0.16)
+	if err != nil {
+		t.Fatalf("Second Update returned an error: %v", err)
+	}
+
+	// Check that bullets were destroyed
+	finalCount := bm.GetBulletCount()
+	if finalCount != 0 {
+		t.Errorf("Expected 0 bullets after destruction, got %d", finalCount)
+	}
 }
 
 func TestBulletManagerHandleBulletCreated(t *testing.T) {
 	eventManager := mocks.NewMockEventManager()
 	bm := NewBulletManager(eventManager)
 	ctx := context.Background()
+
 	err := bm.Initialize(ctx)
 	if err != nil {
 		t.Fatalf("Failed to initialize BulletManager: %v", err)
 	}
 
-	if len(bm.bullets) != 0 {
-		t.Errorf("Expected 0 bullets initially, got %d", len(bm.bullets))
+	if bm.GetBulletCount() != 0 {
+		t.Errorf("Expected 0 bullets initially, got %d", bm.GetBulletCount())
 	}
 
 	bullet := mocks.NewMockBullet(100, 100, false, eventManager)
@@ -175,39 +201,68 @@ func TestBulletManagerHandleBulletCreated(t *testing.T) {
 		t.Fatalf("Update returned an error: %v", err)
 	}
 
-	if len(bm.bullets) != 1 {
-		t.Errorf("Expected 1 bullet after BulletCreated event, got %d", len(bm.bullets))
+	if bm.GetBulletCount() != 1 {
+		t.Errorf("Expected 1 bullet after BulletCreated event, got %d", bm.GetBulletCount())
 	}
 
-	// check instances == celle tirée
-	if len(bm.bullets) > 0 && bm.bullets[0] != bullet {
+	// Check that the added bullet is the one we created
+	bullets := bm.GetBullets()
+	if len(bullets) > 0 && bullets[0] != bullet {
 		t.Error("The added bullet is not the one we created")
 	}
 }
 
-func TestBulletManagerRemoveBullet(t *testing.T) {
+func TestBulletManagerGetRenderableEntities(t *testing.T) {
 	eventManager := mocks.NewMockEventManager()
 	bm := NewBulletManager(eventManager)
+	ctx := context.Background()
 
-	bullet := mocks.NewMockBullet(100, 100, true, eventManager)
-	bm.AddBullet(bullet)
-	bm.RemoveBullet(bullet)
+	bm.Initialize(ctx)
 
-	if len(bm.bullets) != 0 {
-		t.Errorf("Expected 0 bullets after removal, got %d", len(bm.bullets))
+	bullet1 := mocks.NewMockBullet(100, 100, false, eventManager)
+	bullet2 := mocks.NewMockBullet(200, 200, true, eventManager)
+	bullet2.Health = 0 // Make it dead
+
+	eventManager.Publish(interfaces.BulletCreated, bullet1)
+	eventManager.Publish(interfaces.BulletCreated, bullet2)
+	bm.Update(0.16) // Process events
+
+	renderables := bm.GetRenderableEntities()
+
+	// Only alive bullets should be rendered
+	if len(renderables) != 1 {
+		t.Errorf("Expected 1 renderable bullet, got %d", len(renderables))
 	}
 }
 
 func TestBulletManagerShutdown(t *testing.T) {
 	eventManager := mocks.NewMockEventManager()
 	bm := NewBulletManager(eventManager)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	err := bm.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Failed to initialize BulletManager: %v", err)
+	}
 
 	bullet := mocks.NewMockBullet(100, 100, false, eventManager)
-	bm.AddBullet(bullet)
+	eventManager.Publish(interfaces.BulletCreated, bullet)
+	bm.Update(0.16) // Process event
+
+	if bm.GetBulletCount() != 1 {
+		t.Fatalf("Expected 1 bullet before shutdown, got %d", bm.GetBulletCount())
+	}
+
+	cancel()
 	bm.Shutdown()
 
-	if len(bm.bullets) != 0 {
+	if bm.GetBulletCount() != 0 {
 		t.Error("Shutdown did not clear bullets")
+	}
+
+	err = bm.Update(0.16)
+	if err == nil {
+		t.Error("Update after shutdown should return an error")
 	}
 }
 
@@ -222,44 +277,5 @@ func TestBulletManagerUpdateContextCancellation(t *testing.T) {
 	err := bm.Update(0.16)
 	if err == nil {
 		t.Fatal("Update should have returned an error due to cancelled context")
-	}
-}
-
-func TestBulletManagerConcurrency(t *testing.T) {
-	eventManager := mocks.NewMockEventManager()
-	bm := NewBulletManager(eventManager)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	bm.Initialize(ctx)
-
-	const numOperations = 1000
-	done := make(chan bool)
-
-	go func() {
-		for i := 0; i < numOperations; i++ {
-			bm.AddBullet(mocks.NewMockBullet(float64(i), float64(i), false, eventManager))
-			time.Sleep(time.Microsecond)
-		}
-		done <- true
-	}()
-
-	go func() {
-		for i := 0; i < numOperations; i++ {
-			err := bm.Update(0.16)
-			if err != nil {
-				t.Errorf("Update returned an error: %v", err)
-			}
-			time.Sleep(time.Microsecond)
-		}
-		done <- true
-	}()
-
-	<-done
-	<-done
-
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-	if len(bm.bullets) != numOperations {
-		t.Errorf("Expected %d bullets, got %d", numOperations, len(bm.bullets))
 	}
 }

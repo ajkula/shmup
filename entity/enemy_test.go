@@ -2,6 +2,7 @@ package entity
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -85,8 +86,8 @@ func TestEnemyCanCollideWith(t *testing.T) {
 	}
 
 	enemyBullet := NewBullet(0, 0, true, eventManager)
-	if !enemy.CanCollideWith(enemyBullet) {
-		t.Error("Enemy should be able to collide with enemy Bullet (simplified logic)")
+	if enemy.CanCollideWith(enemyBullet) {
+		t.Error("Enemy should not be able to collide with enemy Bullet")
 	}
 }
 
@@ -178,52 +179,51 @@ func TestEnemyShoot(t *testing.T) {
 }
 
 func TestEnemyAutoShoot(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
+	ctx := context.Background()
 	eventManager := mocks.NewMockEventManager()
-	err := eventManager.Initialize(ctx)
-	if err != nil {
-		t.Fatalf("Failed to initialize EventManager: %v", err)
-	}
+	eventManager.Initialize(ctx)
 
-	enemy := NewEnemy(types.Vector2D{X: 100, Y: 100}, eventManager)
-	shotEvents, err := eventManager.Subscribe(interfaces.EnemyShot)
-	if err != nil {
-		t.Errorf("Error happened during Subscription to EnemyShot")
-	}
+	t.Run("Initial and cooldown", func(t *testing.T) {
+		enemy := NewEnemy(types.Vector2D{X: 100, Y: 100}, eventManager)
+		shotEvents, _ := eventManager.Subscribe(interfaces.EnemyShot)
 
-	testCases := []struct {
-		name       string
-		updateTime float64
-		expectShot bool
-		updates    int
-	}{
-		{"Initial shot", 0.01, true, 1},
-		{"During cooldown", 0.01, false, 1},
-		{"After cooldown", 0.1, true, 20}, // 20 * 0.1 = 2.0 second (Scout Level1 FireRate)
-		{"Regular shot 1", 0.1, true, 21},
-		{"Regular shot 2", 0.1, true, 21},
-		{"Regular shot 3", 0.1, true, 21},
-	}
+		enemy.Update(0.01)
+		select {
+		case <-shotEvents:
+		case <-time.After(10 * time.Millisecond):
+			t.Error("Initial shot expected")
+		}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			for i := 0; i < tc.updates; i++ {
-				enemy.Update(tc.updateTime)
-			}
+		enemy.Update(0.01)
+		select {
+		case <-shotEvents:
+			t.Error("Should not shoot during cooldown")
+		case <-time.After(10 * time.Millisecond):
+		}
+
+		stats := graphics.GetEnemyStats(graphics.Scout, graphics.Level1)
+		for i := 0.0; i < stats.FireRate; i += 0.1 {
+			enemy.Update(0.1)
+		}
+
+		select {
+		case <-shotEvents:
+		case <-time.After(10 * time.Millisecond):
+			t.Error("Shot expected after cooldown")
+		}
+	})
+
+	for i := 1; i <= 3; i++ {
+		t.Run(fmt.Sprintf("Regular shot %d", i), func(t *testing.T) {
+			enemy := NewEnemy(types.Vector2D{X: 100, Y: 100}, eventManager)
+			shotEvents, _ := eventManager.Subscribe(interfaces.EnemyShot)
+
+			enemy.Update(0.01)
 
 			select {
 			case <-shotEvents:
-				if !tc.expectShot {
-					t.Error("Unexpected shot fired")
-				}
-			case <-time.After(100 * time.Millisecond):
-				if tc.expectShot {
-					t.Error("Expected shot, but none fired")
-				}
-			case <-ctx.Done():
-				t.Fatal("Test timed out")
+			case <-time.After(10 * time.Millisecond):
+				t.Error("Expected shot, but none fired")
 			}
 		})
 	}

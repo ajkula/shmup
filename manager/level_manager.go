@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
@@ -18,8 +17,6 @@ type LevelManager struct {
 	eventManager  interfaces.EventManagerInterface
 	mu            sync.RWMutex
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
-	shutdownCh    chan struct{}
-	wg            sync.WaitGroup
 	isShutdown    int32
 }
 
@@ -29,7 +26,6 @@ func NewLevelManager(eventManager interfaces.EventManagerInterface) *LevelManage
 		difficulty:    1.0,
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
-		shutdownCh:    make(chan struct{}),
 	}
 }
 
@@ -51,9 +47,6 @@ func (lm *LevelManager) Initialize(ctx context.Context) error {
 		lm.eventChannels[eventType] = ch
 	}
 
-	lm.wg.Add(1)
-	go lm.eventProcessor()
-
 	return nil
 }
 
@@ -62,52 +55,32 @@ func (lm *LevelManager) Update(deltaTime float64) error {
 	case <-lm.CTX.Done():
 		return lm.CTX.Err()
 	default:
-		lm.processAllAvailableEvents()
+		lm.processAllEvents()
 		return nil
 	}
 }
 
-func (lm *LevelManager) eventProcessor() {
-	defer lm.wg.Done()
+func (lm *LevelManager) processAllEvents() {
+	if atomic.LoadInt32(&lm.isShutdown) == 1 {
+		return
+	}
 
-	for {
+	levelEventCh := lm.eventChannels[interfaces.LevelEvent]
+	processed := 0
+	maxProcess := 1000
+
+	for processed < maxProcess {
 		select {
-		case <-lm.CTX.Done():
-			return
-		case <-lm.shutdownCh:
-			return
-		default:
-			lm.processAllAvailableEvents()
-			time.Sleep(16 * time.Millisecond) // ~60fps, prevent CPU burning
-		}
-	}
-}
-
-func (lm *LevelManager) processAllAvailableEvents() {
-	for eventType, ch := range lm.eventChannels {
-		for {
-			select {
-			case evt, ok := <-ch:
-				if !ok {
-					lm.mu.Lock()
-					delete(lm.eventChannels, eventType)
-					lm.mu.Unlock()
-					return
-				}
-				lm.handleEvent(eventType, evt)
-			default:
-				goto nextChannel
+		case evt, ok := <-levelEventCh:
+			if !ok {
+				return
 			}
-		}
-	nextChannel:
-	}
-}
-
-func (lm *LevelManager) handleEvent(eventType interfaces.EventType, evt interfaces.Event) {
-	switch eventType {
-	case interfaces.LevelEvent:
-		if levelChange, ok := evt.Data.(int); ok {
-			lm.AdvanceLevel(levelChange)
+			if levelChange, ok := evt.Data.(int); ok {
+				lm.AdvanceLevel(levelChange)
+			}
+			processed++
+		default:
+			return
 		}
 	}
 }
@@ -139,11 +112,9 @@ func (lm *LevelManager) Shutdown() {
 		return
 	}
 
-	close(lm.shutdownCh)
-	lm.wg.Wait()
-
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
+
 	for eventType, ch := range lm.eventChannels {
 		lm.eventManager.Unsubscribe(eventType, ch)
 	}
@@ -152,5 +123,3 @@ func (lm *LevelManager) Shutdown() {
 	atomic.StoreInt64(&lm.currentLevel, 1)
 	lm.difficulty = 1.0
 }
-
-var _ core.System = (*LevelManager)(nil)

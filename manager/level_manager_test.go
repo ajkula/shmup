@@ -2,9 +2,7 @@ package manager
 
 import (
 	"context"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/mocks"
@@ -119,28 +117,22 @@ func TestLevelManagerConcurrency(t *testing.T) {
 		t.Fatalf("Failed to initialize LevelManager: %v", err)
 	}
 
-	// Wait for eventProcessor to start
-	time.Sleep(10 * time.Millisecond)
-
 	const numOperations = 1000
-	var wg sync.WaitGroup
-	wg.Add(1)
+	const batchSize = 50
 
-	// Single goroutine publishing events
-	go func() {
-		defer wg.Done()
-		for i := 0; i < numOperations; i++ {
-			eventManager.Publish(interfaces.LevelEvent, 1)
+	for i := 0; i < numOperations; i++ {
+		eventManager.Publish(interfaces.LevelEvent, 1)
+
+		if i%batchSize == 0 {
+			lm.Update(0.016)
 		}
-	}()
+	}
 
-	// Wait for all events to be published
-	wg.Wait()
-
-	// Process remaining events synchronously
-	for i := 0; i < 10; i++ {
-		lm.Update(0.16)
-		time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 100; i++ {
+		lm.Update(0.016)
+		if lm.GetLevel() >= numOperations+1 {
+			break
+		}
 	}
 
 	expectedLevel := numOperations + 1

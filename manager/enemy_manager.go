@@ -2,29 +2,25 @@ package manager
 
 import (
 	"context"
-	"fmt"
-	"sync"
-	"time"
+	"sync/atomic"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
+	"github.com/ajkula/shmup/registry"
 	"github.com/ajkula/shmup/types"
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
 type EnemyManager struct {
 	core.BaseSystem
 	enemies       []types.GameEntity
-	formations    []types.Formation
 	eventManager  interfaces.EventManagerInterface
-	mu            sync.RWMutex
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
+	isShutdown    int32
 }
 
 func NewEnemyManager(eventManager interfaces.EventManagerInterface) *EnemyManager {
 	return &EnemyManager{
 		enemies:       make([]types.GameEntity, 0),
-		formations:    make([]types.Formation, 0),
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
 	}
@@ -39,8 +35,6 @@ func (em *EnemyManager) Initialize(ctx context.Context) error {
 	eventTypes := []interfaces.EventType{
 		interfaces.EnemyCreated,
 		interfaces.EnemyDestroyed,
-		interfaces.FormationCreated,
-		interfaces.FormationDestroyed,
 	}
 
 	for _, eventType := range eventTypes {
@@ -51,6 +45,7 @@ func (em *EnemyManager) Initialize(ctx context.Context) error {
 		em.eventChannels[eventType] = ch
 	}
 
+	// PAS de goroutine !
 	return nil
 }
 
@@ -59,137 +54,105 @@ func (em *EnemyManager) Update(deltaTime float64) error {
 	case <-em.CTX.Done():
 		return em.CTX.Err()
 	default:
-		em.processEvents()
-		return em.updateEntities(deltaTime)
+		// Traiter TOUS les events disponibles
+		em.processAllEvents()
+
+		// Update tous les enemies
+		em.updateEnemies()
+
+		return nil
 	}
 }
 
-func (em *EnemyManager) processEvents() {
-	for eventType, ch := range em.eventChannels {
-		for {
-			select {
-			case evt, ok := <-ch:
-				if !ok {
-					return
-				}
-				em.handleEvent(eventType, evt)
-			default:
-				// No more events for this type
+func (em *EnemyManager) processAllEvents() {
+	if atomic.LoadInt32(&em.isShutdown) == 1 {
+		return
+	}
+
+	// Traiter EnemyCreated
+	createdCh := em.eventChannels[interfaces.EnemyCreated]
+	for {
+		select {
+		case evt, ok := <-createdCh:
+			if !ok {
 				return
 			}
+			if enemy, ok := evt.Data.(types.GameEntity); ok {
+				em.enemies = append(em.enemies, enemy)
+			}
+		default:
+			goto processDestroyed
+		}
+	}
+
+processDestroyed:
+	// Traiter EnemyDestroyed
+	destroyedCh := em.eventChannels[interfaces.EnemyDestroyed]
+	for {
+		select {
+		case evt, ok := <-destroyedCh:
+			if !ok {
+				return
+			}
+			if enemy, ok := evt.Data.(types.GameEntity); ok {
+				for i, e := range em.enemies {
+					if e == enemy {
+						em.enemies = append(em.enemies[:i], em.enemies[i+1:]...)
+						break
+					}
+				}
+			}
+		default:
+			return
 		}
 	}
 }
 
-func (em *EnemyManager) handleEvent(eventType interfaces.EventType, evt interfaces.Event) {
-	switch eventType {
-	case interfaces.EnemyCreated:
-		if enemy, ok := evt.Data.(types.GameEntity); ok {
-			em.AddEnemy(enemy)
-		}
-	case interfaces.EnemyDestroyed:
-		if enemy, ok := evt.Data.(types.GameEntity); ok {
-			em.RemoveEnemy(enemy)
-		}
-	case interfaces.FormationCreated:
-		if formation, ok := evt.Data.(types.Formation); ok {
-			em.AddFormation(formation)
-		}
-	case interfaces.FormationDestroyed:
-		if formation, ok := evt.Data.(types.Formation); ok {
-			em.RemoveFormation(formation)
-		}
-	}
-}
-
-func (em *EnemyManager) updateEntities(deltaTime float64) error {
-	em.mu.Lock()
-	defer em.mu.Unlock()
-
+func (em *EnemyManager) updateEnemies() {
 	aliveEnemies := make([]types.GameEntity, 0, len(em.enemies))
 	for _, enemy := range em.enemies {
-		if err := enemy.Update(deltaTime); err != nil {
-			return err
+		if err := enemy.Update(core.FixedDeltaTime); err != nil {
+			continue
 		}
 		if enemy.IsAlive() {
 			aliveEnemies = append(aliveEnemies, enemy)
 		}
 	}
 	em.enemies = aliveEnemies
-
-	for _, formation := range em.formations {
-		if err := formation.Update(deltaTime); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-func (em *EnemyManager) Draw(screen *ebiten.Image) {
-	em.mu.RLock()
-	defer em.mu.RUnlock()
+func (em *EnemyManager) GetRenderableEntities() []types.Renderable {
+	renderables := make([]types.Renderable, 0, len(em.enemies))
 	for _, enemy := range em.enemies {
-		enemy.Draw(screen)
-	}
-}
-
-func (em *EnemyManager) AddEnemy(enemy types.GameEntity) {
-	em.mu.Lock()
-	defer em.mu.Unlock()
-	em.enemies = append(em.enemies, enemy)
-}
-
-func (em *EnemyManager) RemoveEnemy(enemy types.GameEntity) {
-	em.mu.Lock()
-	defer em.mu.Unlock()
-	for i, e := range em.enemies {
-		if e == enemy {
-			em.enemies = append(em.enemies[:i], em.enemies[i+1:]...)
-			break
+		if enemy.IsAlive() {
+			renderables = append(renderables, enemy)
 		}
 	}
+	return renderables
 }
 
-func (em *EnemyManager) AddFormation(formation types.Formation) {
-	em.mu.Lock()
-	defer em.mu.Unlock()
-	em.formations = append(em.formations, formation)
+func (em *EnemyManager) GetEnemyCount() int {
+	return len(em.enemies)
 }
 
-func (em *EnemyManager) RemoveFormation(formation types.Formation) {
-	em.mu.Lock()
-	defer em.mu.Unlock()
-	for i, f := range em.formations {
-		if f == formation {
-			em.formations = append(em.formations[:i], em.formations[i+1:]...)
-			break
-		}
-	}
+func (em *EnemyManager) GetEnemies() []types.GameEntity {
+	enemies := make([]types.GameEntity, len(em.enemies))
+	copy(enemies, em.enemies)
+	return enemies
 }
 
 func (em *EnemyManager) Shutdown() {
-	done := make(chan bool, 1)
-
-	go func() {
-		em.mu.Lock()
-		defer em.mu.Unlock()
-
-		for eventType, ch := range em.eventChannels {
-			em.eventManager.Unsubscribe(eventType, ch)
-		}
-		em.eventChannels = nil
-		em.enemies = nil
-		em.formations = nil
-
-		done <- true
-	}()
-
-	select {
-	case <-done:
-		// noop
-	case <-time.After(time.Second):
-		fmt.Printf("Warning: EnemyManager shutdown timeout\n")
+	if !atomic.CompareAndSwapInt32(&em.isShutdown, 0, 1) {
+		return
 	}
+
+	// Unsubscribe simple, pas de race condition
+	for eventType, ch := range em.eventChannels {
+		em.eventManager.Unsubscribe(eventType, ch)
+	}
+	em.eventChannels = nil
+	em.enemies = nil
 }
 
+var _ registry.EntityProvider = (*EnemyManager)(nil)
 var _ core.System = (*EnemyManager)(nil)

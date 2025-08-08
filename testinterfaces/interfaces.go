@@ -23,12 +23,21 @@ type MockEnemy interface {
 	SetUpdateError(error)
 }
 
-type MockFormation interface {
-	types.Formation
-	SetUpdateCalled(bool)
-}
-
 type MockEventManager interface {
 	interfaces.EventManagerInterface
 	GetPublishedEvents() []interfaces.Event
+	ClearPublishedEvents()
+}
+
+type MockFormationController interface {
+	types.FormationController
+	SetUpdateError(error)
+	SetState(types.FormationState)
+	SetAliveEnemyCount(int)
+}
+
+type MockMovementPattern interface {
+	types.MovementPattern
+	SetOffsetOverride(types.Vector2D)
+	SetCenterMovementOverride(types.Vector2D)
 }

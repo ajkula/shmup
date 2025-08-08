@@ -126,10 +126,8 @@ func TestBossShoot(t *testing.T) {
 	boss := NewBoss(types.Vector2D{X: 100, Y: 100}, eventManager)
 	shotEvents, err := eventManager.Subscribe(interfaces.BossShot)
 	if err != nil {
-		t.Errorf("Error happened during Subscription to BossShot")
+		t.Fatal(err)
 	}
-
-	go eventManager.Run(ctx)
 
 	boss.Update(0.1)
 
@@ -138,34 +136,28 @@ func TestBossShoot(t *testing.T) {
 		if e.Type != interfaces.BossShot {
 			t.Errorf("Expected BossShot event, got %v", e.Type)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Error("No BossShot event received")
-	case <-ctx.Done():
-		t.Fatal("Test timed out")
 	}
 
 	boss.Update(0.1)
-	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-shotEvents:
 		t.Error("Boss should not be able to shoot during cooldown")
 	case <-time.After(100 * time.Millisecond):
-	case <-ctx.Done():
-		t.Fatal("Test timed out")
 	}
 
-	// Update enough times to clear cooldown (0.2 / 0.1 = 2 updates)
-	boss.Update(0.1)
+	for i := 0; i < 4; i++ {
+		boss.Update(0.1)
+	}
 
 	select {
 	case e := <-shotEvents:
 		if e.Type != interfaces.BossShot {
 			t.Errorf("Expected BossShot event, got %v", e.Type)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(100 * time.Millisecond):
 		t.Error("No BossShot event received after cooldown")
-	case <-ctx.Done():
-		t.Fatal("Test timed out")
 	}
 }
 
@@ -182,10 +174,8 @@ func TestBossAutoShoot(t *testing.T) {
 	boss := NewBoss(types.Vector2D{X: 100, Y: 100}, eventManager)
 	shotEvents, err := eventManager.Subscribe(interfaces.BossShot)
 	if err != nil {
-		t.Errorf("Error happened during Subscription to BossShot")
+		t.Fatal(err)
 	}
-
-	go eventManager.Run(ctx)
 
 	testCases := []struct {
 		name       string
@@ -195,10 +185,9 @@ func TestBossAutoShoot(t *testing.T) {
 	}{
 		{"Initial shot", 0.01, true, 1},
 		{"During cooldown", 0.01, false, 1},
-		{"After cooldown", 0.1, true, 2}, // 2 * 0.1 = 0.2 second
-		{"Regular shot 1", 0.1, true, 3}, // +0.3 seconds (>0.2)
-		{"Regular shot 2", 0.1, true, 3},
-		{"Regular shot 3", 0.1, true, 3},
+		{"After cooldown", 0.1, true, 5}, // 0.5s cooldown / 0.1s = 5
+		{"Regular shot 1", 0.1, true, 5},
+		{"Regular shot 2", 0.1, true, 5},
 	}
 
 	for _, tc := range testCases {
@@ -206,7 +195,6 @@ func TestBossAutoShoot(t *testing.T) {
 			for i := 0; i < tc.updates; i++ {
 				boss.Update(tc.updateTime)
 			}
-			time.Sleep(10 * time.Millisecond)
 
 			select {
 			case <-shotEvents:
@@ -217,8 +205,6 @@ func TestBossAutoShoot(t *testing.T) {
 				if tc.expectShot {
 					t.Error("Expected shot, but none fired")
 				}
-			case <-ctx.Done():
-				t.Fatal("Test timed out")
 			}
 		})
 	}

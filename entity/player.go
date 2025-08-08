@@ -14,15 +14,12 @@ type Player struct {
 	types.BaseEntity
 	ShootCooldown float64
 	eventManager  interfaces.EventManagerInterface
-
-	// Input event channel
-	inputEvents <-chan interfaces.Event
+	inputEvents   <-chan interfaces.Event
 }
 
 func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInterface) *Player {
 	inputChan, err := eventManager.Subscribe(interfaces.InputEvent)
 	if err != nil {
-		// Fallback: create a dummy channel if subscription fails
 		dummyChan := make(chan interfaces.Event, 1)
 		close(dummyChan)
 		inputChan = dummyChan
@@ -32,16 +29,15 @@ func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInte
 		BaseEntity: types.BaseEntity{
 			Position: position,
 			Width:    32, Height: 32,
-			Speed:  5, // Hardcoded pour les tests, sera overridé par config si disponible
+			Speed:  5,
 			Health: 100,
-			Color:  color.RGBA{0, 255, 0, 255}, // Vert pour le player
+			Color:  color.RGBA{0, 255, 0, 255},
 		},
 		ShootCooldown: 0,
 		eventManager:  eventManager,
 		inputEvents:   inputChan,
 	}
 
-	// Override with config if available (for runtime)
 	if config.Config.PlayerSpeed > 0 {
 		player.Speed = config.Config.PlayerSpeed
 	}
@@ -50,15 +46,9 @@ func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInte
 }
 
 func (p *Player) Update(deltaTime float64) error {
-	// Réduire le cooldown de tir (peut devenir négatif pour les tests)
 	p.ShootCooldown -= deltaTime
-
-	// Traiter les événements d'input
 	p.processInputEvents()
-
-	// Garder le player dans les limites de l'écran
 	p.constrainToScreen()
-
 	return nil
 }
 
@@ -75,7 +65,7 @@ func (p *Player) processInputEvents() {
 				}
 			}
 		default:
-			return // No more events
+			return
 		}
 	}
 }
@@ -86,7 +76,7 @@ func (p *Player) handleMovement(data map[string]interface{}) {
 		return
 	}
 
-	moveSpeed := p.Speed * deltaTime * 60 // Normaliser pour 60fps
+	moveSpeed := p.Speed * deltaTime * 60
 
 	if left, ok := data["left"].(bool); ok && left {
 		p.Position.X -= moveSpeed

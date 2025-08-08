@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
+	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/mocks"
 )
 
@@ -19,11 +19,8 @@ func TestNewEnemyManager(t *testing.T) {
 	if em.eventManager != eventManager {
 		t.Error("EventManager not set correctly")
 	}
-	if len(em.enemies) != 0 {
+	if em.GetEnemyCount() != 0 {
 		t.Error("Initial enemies slice should be empty")
-	}
-	if len(em.formations) != 0 {
-		t.Error("Initial formations slice should be empty")
 	}
 }
 
@@ -41,18 +38,20 @@ func TestEnemyManagerInitialize(t *testing.T) {
 }
 
 func TestEnemyManagerUpdate(t *testing.T) {
-	em := NewEnemyManager(mocks.NewMockEventManager())
+	eventManager := mocks.NewMockEventManager()
+	em := NewEnemyManager(eventManager)
 	ctx := context.Background()
 	em.Initialize(ctx)
 
+	// Create mock enemies via events
 	enemy1 := &mocks.MockEnemy{Alive: true}
 	enemy2 := &mocks.MockEnemy{Alive: false}
-	formation := &mocks.MockFormation{}
 
-	em.AddEnemy(enemy1)
-	em.AddEnemy(enemy2)
-	em.AddFormation(formation)
+	// Publish enemy creation events
+	eventManager.Publish(interfaces.EnemyCreated, enemy1)
+	eventManager.Publish(interfaces.EnemyCreated, enemy2)
 
+	// Process events dans Update
 	err := em.Update(0.16)
 	if err != nil {
 		t.Fatalf("Update returned an error: %v", err)
@@ -61,71 +60,102 @@ func TestEnemyManagerUpdate(t *testing.T) {
 	if !enemy1.UpdateCalled {
 		t.Error("Update not called on alive enemy")
 	}
-	if !formation.UpdateCalled {
-		t.Error("Update not called on formation")
-	}
 
-	if len(em.enemies) != 1 {
-		t.Error("Dead enemy not removed")
+	// After update, dead enemy should be removed
+	finalCount := em.GetEnemyCount()
+	if finalCount != 1 {
+		t.Errorf("Expected 1 alive enemy after update, got %d", finalCount)
 	}
 }
 
 func TestEnemyManagerUpdateError(t *testing.T) {
-	em := NewEnemyManager(mocks.NewMockEventManager())
+	eventManager := mocks.NewMockEventManager()
+	em := NewEnemyManager(eventManager)
 	ctx := context.Background()
 	em.Initialize(ctx)
 
 	enemy := &mocks.MockEnemy{Alive: true, UpdateError: errors.New("update error")}
-	em.AddEnemy(enemy)
+	eventManager.Publish(interfaces.EnemyCreated, enemy)
 
+	em.Update(0.16)
+
+	// Should not return an error since enemy updates are handled gracefully
 	err := em.Update(0.16)
-	if err == nil {
-		t.Fatal("Update should have returned an error")
+	if err != nil {
+		t.Fatalf("Update should not return error for enemy update failures: %v", err)
 	}
 }
 
-func TestEnemyManagerAddRemoveEnemy(t *testing.T) {
-	em := NewEnemyManager(mocks.NewMockEventManager())
-	enemy := &mocks.MockEnemy{}
+func TestEnemyManagerEnemyEvents(t *testing.T) {
+	eventManager := mocks.NewMockEventManager()
+	em := NewEnemyManager(eventManager)
+	ctx := context.Background()
+	em.Initialize(ctx)
 
-	em.AddEnemy(enemy)
-	if len(em.enemies) != 1 {
-		t.Error("Enemy not added")
+	enemy := &mocks.MockEnemy{Alive: true}
+
+	// Test enemy creation
+	eventManager.Publish(interfaces.EnemyCreated, enemy)
+	em.Update(0.16) // Process events
+
+	if em.GetEnemyCount() != 1 {
+		t.Error("Enemy not added via event")
 	}
 
-	em.RemoveEnemy(enemy)
-	if len(em.enemies) != 0 {
-		t.Error("Enemy not removed")
+	// Test enemy destruction
+	eventManager.Publish(interfaces.EnemyDestroyed, enemy)
+	em.Update(0.16) // Process events
+
+	if em.GetEnemyCount() != 0 {
+		t.Error("Enemy not removed via event")
 	}
 }
 
-func TestEnemyManagerAddRemoveFormation(t *testing.T) {
-	em := NewEnemyManager(mocks.NewMockEventManager())
-	formation := &mocks.MockFormation{}
+func TestEnemyManagerGetRenderableEntities(t *testing.T) {
+	eventManager := mocks.NewMockEventManager()
+	em := NewEnemyManager(eventManager)
+	ctx := context.Background()
+	em.Initialize(ctx)
 
-	em.AddFormation(formation)
-	if len(em.formations) != 1 {
-		t.Error("Formation not added")
-	}
+	enemy1 := &mocks.MockEnemy{Alive: true}
+	enemy2 := &mocks.MockEnemy{Alive: false}
 
-	em.RemoveFormation(formation)
-	if len(em.formations) != 0 {
-		t.Error("Formation not removed")
+	eventManager.Publish(interfaces.EnemyCreated, enemy1)
+	eventManager.Publish(interfaces.EnemyCreated, enemy2)
+
+	em.Update(0.16) // Process events
+
+	renderables := em.GetRenderableEntities()
+
+	// Only alive enemies should be rendered
+	if len(renderables) != 1 {
+		t.Errorf("Expected 1 renderable enemy, got %d", len(renderables))
 	}
 }
 
 func TestEnemyManagerShutdown(t *testing.T) {
-	em := NewEnemyManager(mocks.NewMockEventManager())
-	enemy := &mocks.MockEnemy{}
-	formation := &mocks.MockFormation{}
+	eventManager := mocks.NewMockEventManager()
+	em := NewEnemyManager(eventManager)
+	ctx := context.Background()
 
-	em.AddEnemy(enemy)
-	em.AddFormation(formation)
+	err := em.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Failed to initialize EnemyManager: %v", err)
+	}
+
+	enemy := &mocks.MockEnemy{Alive: true}
+	eventManager.Publish(interfaces.EnemyCreated, enemy)
+
+	em.Update(0.016)
+
+	if em.GetEnemyCount() != 1 {
+		t.Errorf("Expected 1 enemy before shutdown, got %d", em.GetEnemyCount())
+	}
 
 	em.Shutdown()
 
-	if len(em.enemies) != 0 || len(em.formations) != 0 {
-		t.Error("Shutdown did not clear enemies and formations")
+	if em.GetEnemyCount() != 0 {
+		t.Error("Shutdown did not clear enemies")
 	}
 }
 
@@ -140,54 +170,4 @@ func TestEnemyManagerUpdateContextCancellation(t *testing.T) {
 	if err == nil {
 		t.Fatal("Update should have returned an error due to cancelled context")
 	}
-}
-
-func TestEnemyManagerConcurrency(t *testing.T) {
-	em := NewEnemyManager(mocks.NewMockEventManager())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	em.Initialize(ctx)
-
-	const numOperations = 1000
-	done := make(chan bool)
-
-	go func() {
-		defer func() { done <- true }()
-		for i := 0; i < numOperations; i++ {
-			em.AddEnemy(&mocks.MockEnemy{Alive: i%2 == 0})
-			time.Sleep(time.Microsecond * 10)
-		}
-	}()
-
-	go func() {
-		defer func() { done <- true }()
-		for i := 0; i < numOperations; i++ {
-			err := em.Update(0.16)
-			if err != nil {
-				t.Errorf("Update returned an error: %v", err)
-			}
-			time.Sleep(time.Microsecond * 10)
-		}
-	}()
-
-	<-done
-	<-done
-
-	time.Sleep(50 * time.Millisecond)
-
-	for i := 0; i < 10; i++ {
-		em.Update(0.16)
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	em.mu.Lock()
-	enemyCount := len(em.enemies)
-	em.mu.Unlock()
-
-	maxExpected := numOperations/2 + 50 // 500 + 50 = 550 tolerency
-	if enemyCount > maxExpected {
-		t.Errorf("Expected at most %d enemies, got %d", maxExpected, enemyCount)
-	}
-
-	em.Shutdown()
 }

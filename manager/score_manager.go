@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ajkula/shmup/core"
 	"github.com/ajkula/shmup/interfaces"
@@ -18,8 +17,6 @@ type ScoreManager struct {
 	eventManager  interfaces.EventManagerInterface
 	mu            sync.RWMutex
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
-	shutdownCh    chan struct{}
-	wg            sync.WaitGroup
 	isShutdown    int32
 }
 
@@ -29,7 +26,6 @@ func NewScoreManager(eventManager interfaces.EventManagerInterface) *ScoreManage
 		highScore:     0,
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
-		shutdownCh:    make(chan struct{}),
 	}
 }
 
@@ -39,13 +35,17 @@ func (sm *ScoreManager) Initialize(ctx context.Context) error {
 		return err
 	}
 
-	sm.eventChannels[interfaces.ScoreEvent], err = sm.eventManager.Subscribe(interfaces.ScoreEvent)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to ScoreEvent: %w", err)
+	eventTypes := []interfaces.EventType{
+		interfaces.ScoreEvent,
 	}
 
-	sm.wg.Add(1)
-	go sm.eventProcessor()
+	for _, eventType := range eventTypes {
+		ch, err := sm.eventManager.Subscribe(eventType)
+		if err != nil {
+			return fmt.Errorf("failed to subscribe to event type %v: %w", eventType, err)
+		}
+		sm.eventChannels[eventType] = ch
+	}
 
 	return nil
 }
@@ -55,59 +55,32 @@ func (sm *ScoreManager) Update(deltaTime float64) error {
 	case <-sm.CTX.Done():
 		return sm.CTX.Err()
 	default:
-		sm.processAllAvailableEvents()
+		sm.processAllEvents()
 		return nil
 	}
 }
 
-func (sm *ScoreManager) eventProcessor() {
-	defer sm.wg.Done()
+func (sm *ScoreManager) processAllEvents() {
+	if atomic.LoadInt32(&sm.isShutdown) == 1 {
+		return
+	}
 
-	for {
+	scoreEventCh := sm.eventChannels[interfaces.ScoreEvent]
+	processed := 0
+	maxProcess := 1000
+
+	for processed < maxProcess {
 		select {
-		case <-sm.CTX.Done():
-			return
-		case <-sm.shutdownCh:
-			return
-		default:
-			sm.processAllAvailableEvents()
-			time.Sleep(16 * time.Millisecond) // ~60fps, prevent CPU burning
-		}
-	}
-}
-
-func (sm *ScoreManager) processAllAvailableEvents() {
-	sm.mu.RLock()
-	channels := make(map[interfaces.EventType]<-chan interfaces.Event)
-	for k, v := range sm.eventChannels {
-		channels[k] = v
-	}
-	sm.mu.RUnlock()
-
-	for eventType, ch := range channels {
-		for {
-			select {
-			case evt, ok := <-ch:
-				if !ok {
-					sm.mu.Lock()
-					delete(sm.eventChannels, eventType)
-					sm.mu.Unlock()
-					goto nextChannel
-				}
-				sm.handleEvent(eventType, evt)
-			default:
-				goto nextChannel
+		case evt, ok := <-scoreEventCh:
+			if !ok {
+				return
 			}
-		}
-	nextChannel:
-	}
-}
-
-func (sm *ScoreManager) handleEvent(eventType interfaces.EventType, evt interfaces.Event) {
-	switch eventType {
-	case interfaces.ScoreEvent:
-		if scoreChange, ok := evt.Data.(int); ok {
-			sm.AddScore(scoreChange)
+			if scoreChange, ok := evt.Data.(int); ok {
+				sm.AddScore(scoreChange)
+			}
+			processed++
+		default:
+			return
 		}
 	}
 }
@@ -145,9 +118,6 @@ func (sm *ScoreManager) Shutdown() {
 		return
 	}
 
-	close(sm.shutdownCh)
-	sm.wg.Wait()
-
 	sm.mu.Lock()
 	for eventType, ch := range sm.eventChannels {
 		sm.eventManager.Unsubscribe(eventType, ch)
@@ -160,5 +130,3 @@ func (sm *ScoreManager) Shutdown() {
 
 	fmt.Println("ScoreManager shut down")
 }
-
-var _ core.System = (*ScoreManager)(nil)

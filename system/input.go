@@ -30,8 +30,7 @@ func NewInputSystem(eventManager interfaces.EventManagerInterface) *InputSystem 
 }
 
 func (is *InputSystem) Initialize(ctx context.Context) error {
-	is.CTX = ctx
-	return nil
+	return is.BaseSystem.Initialize(ctx)
 }
 
 func (is *InputSystem) Update(deltaTime float64) error {
@@ -40,23 +39,22 @@ func (is *InputSystem) Update(deltaTime float64) error {
 		return is.CTX.Err()
 	default:
 		is.processInput(deltaTime)
+		return nil
 	}
-	return nil
 }
 
 func (is *InputSystem) processInput(deltaTime float64) {
-	// long press
 	inputState := InputState{
 		Left:  ebiten.IsKeyPressed(ebiten.KeyLeft) || ebiten.IsKeyPressed(ebiten.KeyA),
 		Right: ebiten.IsKeyPressed(ebiten.KeyRight) || ebiten.IsKeyPressed(ebiten.KeyD),
 		Up:    ebiten.IsKeyPressed(ebiten.KeyUp) || ebiten.IsKeyPressed(ebiten.KeyW),
 		Down:  ebiten.IsKeyPressed(ebiten.KeyDown) || ebiten.IsKeyPressed(ebiten.KeyS),
-		Shoot: ebiten.IsKeyPressed(ebiten.KeySpace),
+		Shoot: inpututil.IsKeyJustPressed(ebiten.KeySpace),
 		Pause: inpututil.IsKeyJustPressed(ebiten.KeyP),
 	}
 
 	if inputState.Left || inputState.Right || inputState.Up || inputState.Down {
-		is.eventManager.Publish(interfaces.InputEvent, map[string]interface{}{
+		is.eventManager.Publish(interfaces.InputEvent, map[string]any{
 			"type":       "movement",
 			"left":       inputState.Left,
 			"right":      inputState.Right,
@@ -66,23 +64,19 @@ func (is *InputSystem) processInput(deltaTime float64) {
 		})
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		is.eventManager.Publish(interfaces.InputEvent, map[string]interface{}{
+	if inputState.Shoot {
+		is.eventManager.Publish(interfaces.InputEvent, map[string]any{
 			"type": "shoot",
 		})
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
-		is.eventManager.Publish(interfaces.InputEvent, map[string]interface{}{
+	if inputState.Pause {
+		is.eventManager.Publish(interfaces.InputEvent, map[string]any{
 			"type": "pause",
 		})
 	}
 }
 
-func (is *InputSystem) Run(ctx context.Context) error {
-	return is.BaseSystem.Run(ctx)
-}
-
 func (is *InputSystem) Shutdown() {
-	// cleanup
+	is.BaseSystem.Shutdown()
 }
