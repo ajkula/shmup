@@ -84,7 +84,8 @@ func TestPlayerOnCollision(t *testing.T) {
 		t.Errorf("Error happened during Subscription to PlayerDamaged")
 	}
 
-	player.OnCollision(nil)
+	enemyBullet := NewBullet(100, 100, true, eventManager)
+	player.OnCollision(enemyBullet)
 	eventManager.Update(0)
 
 	if player.GetHealth() != 90 {

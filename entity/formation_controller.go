@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ajkula/shmup/config"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 )
@@ -109,6 +110,15 @@ func (f *Formation) updateActive(currentTime float64) {
 	for i, enemy := range enemies {
 		if enemy.IsAlive() {
 			enemy.SetPosition(positions[i])
+		}
+	}
+
+	// Check if formation should exit (moved off screen)
+	if f.centerPosition.Y > float64(config.Config.ScreenHeight+200) { // Give more margin
+		atomic.StoreInt32(&f.state, int32(types.FormationExiting))
+		// Remove all enemies from formation when exiting
+		for _, enemy := range f.enemies {
+			enemy.TakeDamage(999999) // Force kill to clean up
 		}
 	}
 }

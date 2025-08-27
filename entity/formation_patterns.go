@@ -3,7 +3,6 @@ package entity
 import (
 	"math"
 
-	"github.com/ajkula/shmup/config"
 	"github.com/ajkula/shmup/types"
 )
 
@@ -16,6 +15,16 @@ type BaseMovementPattern struct {
 	VerticalSpeed float64
 }
 
+type PatternConfig struct {
+	Spacing       float64
+	Speed         float64
+	VerticalSpeed float64
+	Radius        float64 // CirclePattern
+	Amplitude     float64 // SineWavePattern
+	Frequency     float64 // SineWavePattern
+	RotationSpeed float64 // CirclePattern
+}
+
 // VFormationPattern - Classic V formation moving down
 type VFormationPattern struct {
 	BaseMovementPattern
@@ -23,14 +32,14 @@ type VFormationPattern struct {
 	AngleOffset float64
 }
 
-func NewVFormationPattern(spacing, speed float64) *VFormationPattern {
+func NewVFormationPattern(config PatternConfig) *VFormationPattern {
 	return &VFormationPattern{
 		BaseMovementPattern: BaseMovementPattern{
-			Speed:         speed,
-			VerticalSpeed: config.Config.EnemySpeed,
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
 		},
-		Spacing:     spacing,
-		AngleOffset: math.Pi / 6, // 30 degrees
+		Spacing:     config.Spacing,
+		AngleOffset: math.Pi / 6,
 	}
 }
 
@@ -44,24 +53,19 @@ func (v *VFormationPattern) GetOffset(enemyIndex int, time float64, formation ty
 	centerIndex := float64(enemyCount-1) / 2.0
 	relativeIndex := float64(enemyIndex) - centerIndex
 
-	// V formation: enemies spread in V shape
-	side := 1.0
-	if relativeIndex < 0 {
-		side = -1.0
-	}
-
-	distance := math.Abs(relativeIndex) * v.Spacing
+	xOffset := relativeIndex * v.Spacing
+	yOffset := math.Abs(relativeIndex) * v.Spacing * 0.5
 
 	return types.Vector2D{
-		X: side * distance * math.Cos(v.AngleOffset),
-		Y: -distance * math.Sin(v.AngleOffset), // Slight upward offset for V
+		X: xOffset,
+		Y: -yOffset,
 	}
 }
 
 func (v *VFormationPattern) GetCenterMovement(time float64) types.Vector2D {
 	return types.Vector2D{
 		X: 0,
-		Y: v.VerticalSpeed * time * 60, // Add 60x multiplier
+		Y: v.VerticalSpeed * time,
 	}
 }
 
@@ -71,13 +75,13 @@ type LineFormationPattern struct {
 	Spacing float64
 }
 
-func NewLineFormationPattern(spacing, speed float64) *LineFormationPattern {
+func NewLineFormationPattern(config PatternConfig) *LineFormationPattern {
 	return &LineFormationPattern{
 		BaseMovementPattern: BaseMovementPattern{
-			Speed:         speed,
-			VerticalSpeed: config.Config.EnemySpeed,
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
 		},
-		Spacing: spacing,
+		Spacing: config.Spacing,
 	}
 }
 
@@ -110,14 +114,14 @@ type CircleFormationPattern struct {
 	RotationSpeed float64
 }
 
-func NewCircleFormationPattern(radius, rotationSpeed, speed float64) *CircleFormationPattern {
+func NewCircleFormationPattern(config PatternConfig) *CircleFormationPattern {
 	return &CircleFormationPattern{
 		BaseMovementPattern: BaseMovementPattern{
-			Speed:         speed,
-			VerticalSpeed: config.Config.EnemySpeed,
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
 		},
-		Radius:        radius,
-		RotationSpeed: rotationSpeed,
+		Radius:        config.Radius,
+		RotationSpeed: config.RotationSpeed,
 	}
 }
 
@@ -153,15 +157,15 @@ type SineWaveFormationPattern struct {
 	Spacing   float64
 }
 
-func NewSineWaveFormationPattern(amplitude, frequency, spacing, speed float64) *SineWaveFormationPattern {
+func NewSineWaveFormationPattern(config PatternConfig) *SineWaveFormationPattern {
 	return &SineWaveFormationPattern{
 		BaseMovementPattern: BaseMovementPattern{
-			Speed:         speed,
-			VerticalSpeed: config.Config.EnemySpeed,
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
 		},
-		Amplitude: amplitude,
-		Frequency: frequency,
-		Spacing:   spacing,
+		Amplitude: config.Amplitude,
+		Frequency: config.Frequency,
+		Spacing:   config.Spacing,
 	}
 }
 

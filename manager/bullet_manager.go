@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync/atomic"
 
 	"github.com/ajkula/shmup/core"
@@ -15,6 +16,7 @@ import (
 type BulletManager struct {
 	core.BaseSystem
 	bullets       []types.GameEntity
+	player        types.GameEntity
 	eventManager  interfaces.EventManagerInterface
 	eventChannels map[interfaces.EventType]<-chan interfaces.Event
 	isShutdown    int32
@@ -26,6 +28,10 @@ func NewBulletManager(eventManager interfaces.EventManagerInterface) *BulletMana
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
 	}
+}
+
+func (bm *BulletManager) SetPlayer(player types.GameEntity) {
+	bm.player = player
 }
 
 func (bm *BulletManager) Initialize(ctx context.Context) error {
@@ -134,20 +140,51 @@ func (bm *BulletManager) handleEnemyShot(evt interfaces.Event) {
 	}
 
 	pos := shooter.GetPosition()
-	bullet := entity.NewBullet(pos.X+16, pos.Y, true, bm.eventManager)
+
+	if bm.player != nil && bm.player.IsAlive() {
+		playerPos := bm.player.GetPosition()
+		dx := playerPos.X - pos.X
+		dy := playerPos.Y - pos.Y
+
+		length := math.Sqrt(dx*dx + dy*dy)
+		if length > 0 {
+			direction := types.Vector2D{X: dx / length, Y: dy / length}
+			bullet := entity.NewBulletWithDirection(
+				pos.X+16, pos.Y+32,
+				direction,
+				200,  // speed
+				true, // isEnemy = true
+				bm.eventManager,
+			)
+			bm.bullets = append(bm.bullets, bullet)
+			bm.eventManager.Publish(interfaces.BulletCreated, bullet)
+			return
+		}
+	}
+
+	bullet := entity.NewBullet(pos.X+16, pos.Y+32, true, bm.eventManager)
 	bm.bullets = append(bm.bullets, bullet)
 	bm.eventManager.Publish(interfaces.BulletCreated, bullet)
 }
 
 func (bm *BulletManager) handlePatternShot(patternEvent interfaces.PatternShootEvent) {
 	shooterPos := patternEvent.Shooter.GetPosition()
-	shots := patternEvent.Pattern.GenerateShots(shooterPos, nil)
+
+	var targetPos *types.Vector2D
+	if bm.player != nil && bm.player.IsAlive() {
+		playerPos := bm.player.GetPosition()
+		targetPos = &playerPos
+	}
+
+	shots := patternEvent.Pattern.GenerateShots(shooterPos, targetPos)
 
 	for _, shot := range shots {
 		bullet := entity.NewBulletWithDirection(
 			shot.Position.X, shot.Position.Y,
 			shot.Direction, shot.Speed,
-			true, bm.eventManager)
+			true, // isEnemy = true
+			bm.eventManager,
+		)
 		bm.bullets = append(bm.bullets, bullet)
 		bm.eventManager.Publish(interfaces.BulletCreated, bullet)
 	}

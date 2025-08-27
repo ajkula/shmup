@@ -12,6 +12,7 @@ import (
 
 type Player struct {
 	types.BaseEntity
+	playerClass   graphics.PlayerClass
 	ShootCooldown float64
 	eventManager  interfaces.EventManagerInterface
 	inputEvents   <-chan interfaces.Event
@@ -36,6 +37,7 @@ func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInte
 		ShootCooldown: 0,
 		eventManager:  eventManager,
 		inputEvents:   inputChan,
+		playerClass:   graphics.StandardFighter,
 	}
 
 	if config.Config.PlayerSpeed > 0 {
@@ -68,6 +70,10 @@ func (p *Player) processInputEvents() {
 			return
 		}
 	}
+}
+
+func (p *Player) GetSprite() *graphics.SpriteData {
+	return graphics.GetPlayerSprite(graphics.StandardFighter)
 }
 
 func (p *Player) handleMovement(data map[string]interface{}) {
@@ -126,11 +132,27 @@ func (p *Player) CanCollideWith(other types.Entity) bool {
 }
 
 func (p *Player) OnCollision(other types.Entity) {
-	p.TakeDamage(10)
-	p.eventManager.Publish(interfaces.PlayerDamaged, p)
+	switch o := other.(type) {
+	case *Enemy:
+		p.TakeDamage(20)
+		p.eventManager.Publish(interfaces.PlayerDamaged, p)
+	case *Boss:
+		p.TakeDamage(50)
+		p.eventManager.Publish(interfaces.PlayerDamaged, p)
+	case *Bullet:
+		if o.IsEnemyBullet() {
+			p.TakeDamage(10)
+			p.eventManager.Publish(interfaces.PlayerDamaged, p)
+		}
+	}
+
 	if p.Health <= 0 {
 		p.eventManager.Publish(interfaces.PlayerDestroyed, p)
 	}
+}
+
+func (p *Player) GetPlayerClass() graphics.PlayerClass {
+	return p.playerClass
 }
 
 func (p *Player) CanShoot() bool {

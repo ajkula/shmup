@@ -3,6 +3,7 @@ package types
 import (
 	"image/color"
 
+	"github.com/ajkula/shmup/graphics"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -12,6 +13,12 @@ type BaseEntity struct {
 	Speed         float64
 	Health        int
 	Color         color.Color
+	sprite        *graphics.SpriteData
+}
+
+// GetSprite implements Entity.
+func (e *BaseEntity) GetSprite() *graphics.SpriteData {
+	return nil
 }
 
 func (e *BaseEntity) GetPosition() Vector2D {

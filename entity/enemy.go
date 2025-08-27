@@ -115,16 +115,21 @@ func (e *Enemy) CanCollideWith(other types.Entity) bool {
 }
 
 func (e *Enemy) OnCollision(other types.Entity) {
-	switch other.(type) {
+	switch o := other.(type) {
 	case *Player:
 		e.TakeDamage(e.Health)
-		e.eventManager.Publish(interfaces.EnemyDestroyed, e)
-	case *Bullet:
-		e.TakeDamage(10)
 		if e.Health <= 0 {
 			e.eventManager.Publish(interfaces.EnemyDestroyed, e)
-		} else {
-			e.eventManager.Publish(interfaces.EnemyDamaged, e)
+		}
+	case *Bullet:
+		if !o.IsEnemyBullet() {
+			e.TakeDamage(10)
+			if e.Health <= 0 {
+				e.eventManager.Publish(interfaces.EnemyDestroyed, e)
+				e.eventManager.Publish(interfaces.ScoreEvent, 100)
+			} else {
+				e.eventManager.Publish(interfaces.EnemyDamaged, e)
+			}
 		}
 	}
 }
@@ -155,6 +160,10 @@ func (e *Enemy) GetShootCooldownRemaining() float64 {
 
 func (e *Enemy) GetEnemyType() graphics.EnemyType {
 	return e.EnemyType
+}
+
+func (e *Enemy) GetSprite() *graphics.SpriteData {
+	return e.sprite
 }
 
 func (e *Enemy) GetEnemyLevel() graphics.EnemyLevel {

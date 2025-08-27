@@ -84,8 +84,21 @@ func NewGame(ctx context.Context) (*Game, error) {
 	levelManager := manager.NewLevelManager(eventManager)
 	waveManager := manager.NewWaveManager(eventManager)
 
+	g.player = entity.NewPlayer(
+		types.Vector2D{
+			X: float64(config.Config.ScreenWidth / 2),
+			Y: float64(config.Config.ScreenHeight - 50),
+		},
+		eventManager,
+	)
+
+	g.entityRegistry.AddStaticEntity(g.player)
+	bulletManager.SetPlayer(g.player)
+	collisionSystem.SetPlayer(g.player)
+
 	g.entityRegistry.RegisterProvider(enemyManager)
 	g.entityRegistry.RegisterProvider(bulletManager)
+	collisionSystem.SetEntityRegistry(g.entityRegistry)
 
 	g.eventDrivenSystems = append(g.eventDrivenSystems,
 		stateManager,
@@ -110,14 +123,6 @@ func NewGame(ctx context.Context) (*Game, error) {
 			return nil, fmt.Errorf("failed to initialize event-driven system: %w", err)
 		}
 	}
-
-	g.player = entity.NewPlayer(
-		types.Vector2D{
-			X: float64(config.Config.ScreenWidth / 2),
-			Y: float64(config.Config.ScreenHeight - 50),
-		},
-		eventManager,
-	)
 
 	g.entityRegistry.AddStaticEntity(g.player)
 

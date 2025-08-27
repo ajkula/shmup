@@ -3,6 +3,7 @@ package entity
 import (
 	"time"
 
+	"github.com/ajkula/shmup/graphics"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -32,7 +33,7 @@ func NewBoss(position types.Vector2D, eventManager interfaces.EventManagerInterf
 		BaseEntity: types.BaseEntity{
 			Position: position,
 			Width:    64, Height: 64,
-			Speed:  1,
+			Speed:  3,
 			Health: 1000,
 		},
 		phase:           1,
@@ -64,6 +65,14 @@ func (b *Boss) Update(deltaTime float64) error {
 	return nil
 }
 
+func (b *Boss) GetSprite() *graphics.SpriteData {
+	level := graphics.Level1
+	if b.phase == 2 {
+		level = graphics.Level2
+	}
+	return graphics.GetEnemySprite(graphics.Boss, level)
+}
+
 func (b *Boss) nextPattern() {
 	b.currentPattern = (b.currentPattern + 1) % len(b.patternSequence)
 
@@ -89,11 +98,23 @@ func (b *Boss) CanCollideWith(other types.Entity) bool {
 }
 
 func (b *Boss) OnCollision(other types.Entity) {
-	b.TakeDamage(10)
-	b.eventManager.Publish(interfaces.BossDamaged, b)
-	if b.Health <= 0 {
-		b.eventManager.Publish(interfaces.BossDefeated, b)
+	switch o := other.(type) {
+	case *Player:
+		return
+	case *Bullet:
+		if !o.IsEnemyBullet() {
+			b.TakeDamage(10)
+			b.eventManager.Publish(interfaces.BossDamaged, b)
+			if b.Health <= 0 {
+				b.eventManager.Publish(interfaces.BossDefeated, b)
+				b.eventManager.Publish(interfaces.ScoreEvent, 500)
+			}
+		}
 	}
+}
+
+func (b *Boss) GetBossType() graphics.EnemyType {
+	return graphics.Boss
 }
 
 func (b *Boss) CanShoot() bool {

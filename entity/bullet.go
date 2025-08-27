@@ -1,10 +1,10 @@
 package entity
 
 import (
-	"fmt"
 	"image/color"
 
 	"github.com/ajkula/shmup/config"
+	"github.com/ajkula/shmup/graphics"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -56,15 +56,15 @@ func (b *Bullet) Update(deltaTime float64) error {
 	newPos := oldPos.Add(b.direction.Multiply(b.Speed * deltaTime))
 	b.SetPosition(newPos)
 
-	if b.isEnemy && oldPos.Y < 100 { // TEMP LOG
-		fmt.Printf("🔴 Enemy bullet move: (%.1f, %.1f) → (%.1f, %.1f)\n", oldPos.X, oldPos.Y, newPos.X, newPos.Y)
-	}
+	// if b.isEnemy && oldPos.Y < 100 { // TEMP LOG
+	// 	fmt.Printf("🔴 Enemy bullet move: (%.1f, %.1f) → (%.1f, %.1f)\n", oldPos.X, oldPos.Y, newPos.X, newPos.Y)
+	// }
 
 	if b.IsOutOfBounds() {
-		if b.isEnemy { // TEMP LOG
-			fmt.Printf("💀 Enemy bullet OOB: (%.1f, %.1f) bounds: 0-%.1f, 0-%.1f\n",
-				newPos.X, newPos.Y, float64(config.Config.ScreenWidth), float64(config.Config.ScreenHeight))
-		}
+		// if b.isEnemy { // TEMP LOG
+		// 	fmt.Printf("💀 Enemy bullet OOB: (%.1f, %.1f) bounds: 0-%.1f, 0-%.1f\n",
+		// 		newPos.X, newPos.Y, float64(config.Config.ScreenWidth), float64(config.Config.ScreenHeight))
+		// }
 		b.Destroy()
 	}
 
@@ -131,6 +131,10 @@ func (b *Bullet) CanCollideWith(other types.Entity) bool {
 
 func (b *Bullet) OnCollision(other types.Entity) {
 	b.Destroy()
+}
+
+func (b *Bullet) GetSprite() *graphics.SpriteData {
+	return nil
 }
 
 func (b *Bullet) IsEnemyBullet() bool {

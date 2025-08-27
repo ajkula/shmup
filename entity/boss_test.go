@@ -97,7 +97,8 @@ func TestBossOnCollision(t *testing.T) {
 
 	go eventManager.Run(ctx)
 
-	boss.OnCollision(nil)
+	playerBullet := NewBullet(100, 100, false, eventManager)
+	boss.OnCollision(playerBullet)
 
 	if boss.Health != 990 {
 		t.Errorf("Boss health after collision: got %v, want 990", boss.Health)
@@ -233,7 +234,8 @@ func TestBossPhaseChange(t *testing.T) {
 	shotsNeeded := (initialHealth-500)/damagePerShot + 1
 
 	for i := 1; i < shotsNeeded; i++ {
-		boss.OnCollision(nil)
+		playerBullet := NewBullet(100, 100, false, eventManager)
+		boss.OnCollision(playerBullet)
 		boss.Update(0.1)
 
 		if i < shotsNeeded-1 {

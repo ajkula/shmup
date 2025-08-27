@@ -3,6 +3,7 @@ package mocks
 import (
 	"image/color"
 
+	"github.com/ajkula/shmup/graphics"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -47,3 +48,4 @@ func (m *MockEnemy) TakeDamage(amount int)                  {}
 func (m *MockEnemy) GetHealth() int                         { return 0 }
 func (m *MockEnemy) GetColor() color.Color                  { return color.White }
 func (m *MockEnemy) CanCollideWith(other types.Entity) bool { return false }
+func (m *MockEnemy) GetSprite() *graphics.SpriteData        { return nil }

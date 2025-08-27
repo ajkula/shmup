@@ -3,6 +3,7 @@ package types
 import (
 	"image/color"
 
+	"github.com/ajkula/shmup/graphics"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -38,6 +39,7 @@ type Entity interface {
 	TakeDamage(amount int)
 	GetHealth() int
 	GetColor() color.Color
+	GetSprite() *graphics.SpriteData
 }
 
 // Can be updated

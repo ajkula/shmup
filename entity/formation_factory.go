@@ -3,6 +3,7 @@ package entity
 import (
 	"fmt"
 
+	"github.com/ajkula/shmup/config"
 	"github.com/ajkula/shmup/graphics"
 	"github.com/ajkula/shmup/interfaces"
 	"github.com/ajkula/shmup/types"
@@ -44,17 +45,30 @@ func (ff *FormationFactory) CreatePresetFormation(
 	id := fmt.Sprintf("formation_%d", ff.idCounter)
 
 	var pattern types.MovementPattern
+	cfg := PatternConfig{
+		Speed:         60.0,
+		VerticalSpeed: config.Config.EnemySpeed,
+	}
+
 	switch formationType {
 	case PresetVFormation:
-		pattern = NewVFormationPattern(40.0, 60.0)
+		cfg.Spacing = 40.0
+		pattern = NewVFormationPattern(cfg)
 	case PresetLineFormation:
-		pattern = NewLineFormationPattern(50.0, 80.0)
+		cfg.Spacing = 50.0
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 1.2 // a bit faster
+		pattern = NewLineFormationPattern(cfg)
 	case PresetCircleFormation:
-		pattern = NewCircleFormationPattern(60.0, 1.0, 70.0)
+		cfg.Radius = 60.0
+		cfg.RotationSpeed = 1.0
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.8 // a bit slower
+		pattern = NewCircleFormationPattern(cfg)
 	case PresetSineWaveFormation:
-		pattern = NewSineWaveFormationPattern(100.0, 2.0, 45.0, 65.0)
-	default:
-		pattern = NewVFormationPattern(40.0, 60.0)
+		cfg.Amplitude = 100.0
+		cfg.Frequency = 2.0
+		cfg.Spacing = 45.0
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.9
+		pattern = NewSineWaveFormationPattern(cfg)
 	}
 
 	formation := NewFormation(id, pattern, centerPos, ff.eventManager)
@@ -76,6 +90,44 @@ func (ff *FormationFactory) CreatePresetFormation(
 	return formation
 }
 
+func (ff *FormationFactory) CreateFormationWithConfig(
+	formationType PresetFormationType,
+	centerPos types.Vector2D,
+	enemyType graphics.EnemyType,
+	enemyLevel graphics.EnemyLevel,
+	enemyCount int,
+	patternConfig PatternConfig,
+) types.FormationController {
+	ff.idCounter++
+	id := fmt.Sprintf("formation_%d", ff.idCounter)
+
+	var pattern types.MovementPattern
+	switch formationType {
+	case PresetVFormation:
+		pattern = NewVFormationPattern(patternConfig)
+	case PresetLineFormation:
+		pattern = NewLineFormationPattern(patternConfig)
+	case PresetCircleFormation:
+		pattern = NewCircleFormationPattern(patternConfig)
+	case PresetSineWaveFormation:
+		pattern = NewSineWaveFormationPattern(patternConfig)
+	}
+
+	formation := NewFormation(id, pattern, centerPos, ff.eventManager)
+
+	for i := 0; i < enemyCount; i++ {
+		offset := pattern.GetOffset(i, 0, formation)
+		enemyPos := centerPos.Add(offset)
+
+		enemy := NewEnemyWithType(enemyPos, ff.eventManager, enemyType, enemyLevel)
+		formation.AddEnemy(enemy)
+
+		ff.eventManager.Publish(interfaces.EnemyCreated, enemy)
+	}
+
+	return formation
+}
+
 // CreateCustomFormation for full control
 func (ff *FormationFactory) CreateCustomFormation(
 	pattern types.MovementPattern,
@@ -88,12 +140,14 @@ func (ff *FormationFactory) CreateCustomFormation(
 
 	formation := NewFormation(id, pattern, centerPos, ff.eventManager)
 
-	for _, enemy := range enemies {
-		formation.AddEnemy(enemy)
-		ff.eventManager.Publish(interfaces.EnemyAddedToFormation, map[string]interface{}{
-			"enemy":     enemy,
-			"formation": formation,
-		})
+	if len(enemies) > 0 {
+		for _, enemy := range enemies {
+			formation.AddEnemy(enemy)
+			ff.eventManager.Publish(interfaces.EnemyAddedToFormation, map[string]any{
+				"enemy":     enemy,
+				"formation": formation,
+			})
+		}
 	}
 
 	return formation
@@ -130,7 +184,44 @@ func (ff *FormationFactory) CreateMixedWave(centerPos types.Vector2D) []types.Fo
 	return formations
 }
 
-// SpawnFormation implements FormationSpawner interface
-func (ff *FormationFactory) SpawnFormation(pattern types.MovementPattern, centerPos types.Vector2D, enemyCount int) types.FormationController {
-	return ff.CreateCustomFormation(pattern, centerPos, make([]types.GameEntity, 0, enemyCount))
+func (ff *FormationFactory) SpawnFormation(
+	pattern types.MovementPattern,
+	centerPos types.Vector2D,
+	enemyCount int,
+) types.FormationController {
+	enemies := make([]types.GameEntity, 0, enemyCount)
+	formation := NewFormation("temp", pattern, centerPos, ff.eventManager)
+
+	for i := 0; i < enemyCount; i++ {
+		offset := pattern.GetOffset(i, 0, formation)
+		enemyPos := centerPos.Add(offset)
+
+		enemy := NewEnemyWithType(enemyPos, ff.eventManager, graphics.Scout, graphics.Level1)
+		enemies = append(enemies, enemy)
+		ff.eventManager.Publish(interfaces.EnemyCreated, enemy)
+	}
+
+	return ff.CreateCustomFormation(pattern, centerPos, enemies)
+}
+
+func (ff *FormationFactory) SpawnFormationWithType(
+	pattern types.MovementPattern,
+	centerPos types.Vector2D,
+	enemyType graphics.EnemyType,
+	enemyLevel graphics.EnemyLevel,
+	enemyCount int,
+) types.FormationController {
+	enemies := make([]types.GameEntity, 0, enemyCount)
+	formation := NewFormation("temp", pattern, centerPos, ff.eventManager)
+
+	for i := 0; i < enemyCount; i++ {
+		offset := pattern.GetOffset(i, 0, formation)
+		enemyPos := centerPos.Add(offset)
+
+		enemy := NewEnemyWithType(enemyPos, ff.eventManager, enemyType, enemyLevel)
+		enemies = append(enemies, enemy)
+		ff.eventManager.Publish(interfaces.EnemyCreated, enemy)
+	}
+
+	return ff.CreateCustomFormation(pattern, centerPos, enemies)
 }

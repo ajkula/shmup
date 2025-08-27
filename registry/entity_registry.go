@@ -18,7 +18,7 @@ type EntityRegistry struct {
 	core.BaseSystem
 	providers      []EntityProvider
 	staticEntities []types.Renderable
-	snapshot       atomic.Value // []types.Renderable
+	snapshot       atomic.Value
 	mu             sync.RWMutex
 	eventManager   interfaces.EventManagerInterface
 	isShutdown     int32
@@ -73,6 +73,10 @@ func (er *EntityRegistry) eventListener(systemTickCh <-chan interfaces.Event) {
 			}
 		}
 	}
+}
+
+func (er *EntityRegistry) GetRenderableEntities() []types.Renderable {
+	return er.GetSnapshot()
 }
 
 func (er *EntityRegistry) updateSnapshot() {

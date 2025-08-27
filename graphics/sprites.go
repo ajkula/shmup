@@ -195,14 +195,14 @@ var enemySprites = map[EnemyType]map[EnemyLevel]*SpriteData{
 
 var enemyStats = map[EnemyType]map[EnemyLevel]EnemyStats{
 	Scout: {
-		Level1: {HP: 1, Speed: 3.0, Damage: 5, FireRate: 2.0},
-		Level2: {HP: 2, Speed: 4.0, Damage: 8, FireRate: 1.8},
+		Level1: {HP: 1, Speed: 5.0, Damage: 5, FireRate: 2.0},
+		Level2: {HP: 2, Speed: 7.0, Damage: 8, FireRate: 1.8},
 	},
 	Fighter: {
-		Level1: {HP: 5, Speed: 2.0, Damage: 10, FireRate: 1.5},
+		Level1: {HP: 5, Speed: 6.0, Damage: 10, FireRate: 1.5},
 	},
 	Heavy: {
-		Level1: {HP: 15, Speed: 1.0, Damage: 20, FireRate: 3.0},
+		Level1: {HP: 15, Speed: 4.0, Damage: 20, FireRate: 3.0},
 	},
 }
 

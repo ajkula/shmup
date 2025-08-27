@@ -24,7 +24,7 @@ func Init() {
 		ScreenWidth:        640,
 		ScreenHeight:       928,
 		PlayerSpeed:        5.0,
-		EnemySpeed:         2.0,
+		EnemySpeed:         2.2,
 		BulletSpeed:        10.0,
 		BossThreshold:      5, // waves before BOSS
 		EnemySpawnInterval: 2.0,

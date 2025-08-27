@@ -45,7 +45,6 @@ func (em *EnemyManager) Initialize(ctx context.Context) error {
 		em.eventChannels[eventType] = ch
 	}
 
-	// PAS de goroutine !
 	return nil
 }
 
@@ -54,10 +53,8 @@ func (em *EnemyManager) Update(deltaTime float64) error {
 	case <-em.CTX.Done():
 		return em.CTX.Err()
 	default:
-		// Traiter TOUS les events disponibles
 		em.processAllEvents()
 
-		// Update tous les enemies
 		em.updateEnemies()
 
 		return nil
@@ -69,7 +66,6 @@ func (em *EnemyManager) processAllEvents() {
 		return
 	}
 
-	// Traiter EnemyCreated
 	createdCh := em.eventChannels[interfaces.EnemyCreated]
 	for {
 		select {
@@ -86,7 +82,6 @@ func (em *EnemyManager) processAllEvents() {
 	}
 
 processDestroyed:
-	// Traiter EnemyDestroyed
 	destroyedCh := em.eventChannels[interfaces.EnemyDestroyed]
 	for {
 		select {
@@ -146,7 +141,6 @@ func (em *EnemyManager) Shutdown() {
 		return
 	}
 
-	// Unsubscribe simple, pas de race condition
 	for eventType, ch := range em.eventChannels {
 		em.eventManager.Unsubscribe(eventType, ch)
 	}

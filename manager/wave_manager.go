@@ -25,6 +25,7 @@ type WaveDefinition struct {
 	SpawnDelay    float64 // seconds after previous wave
 	SpawnPosition types.Vector2D
 	Priority      int // higher = spawns first if multiple ready
+	PatternConfig *entity.PatternConfig
 }
 
 // WaveState tracks wave lifecycle
@@ -145,41 +146,6 @@ func (wm *WaveManager) updateActiveFormations() {
 	}
 }
 
-func (wm *WaveManager) eventListener() {
-	systemTickCh := wm.eventChannels[interfaces.SystemTick]
-	formationDestroyedCh := wm.eventChannels[interfaces.FormationDestroyed]
-	levelChangedCh := wm.eventChannels[interfaces.LevelChanged]
-	playerDestroyedCh := wm.eventChannels[interfaces.PlayerDestroyed]
-
-	for {
-		select {
-		case <-wm.CTX.Done():
-			return
-		case _, ok := <-systemTickCh:
-			if !ok {
-				return
-			}
-			wm.processAllAvailableEvents()
-			wm.updateWaveSpawning()
-		case evt, ok := <-formationDestroyedCh:
-			if !ok {
-				return
-			}
-			wm.handleFormationDestroyed(evt)
-		case evt, ok := <-levelChangedCh:
-			if !ok {
-				return
-			}
-			wm.handleLevelChanged(evt)
-		case evt, ok := <-playerDestroyedCh:
-			if !ok {
-				return
-			}
-			wm.handlePlayerDestroyed(evt)
-		}
-	}
-}
-
 func (wm *WaveManager) processAllAvailableEvents() {
 	if atomic.LoadInt32(&wm.isShutdown) == 1 {
 		return
@@ -271,14 +237,28 @@ func (wm *WaveManager) spawnNextWave(currentTime float64) {
 	waveDef := wm.pendingWaves[0]
 	wm.pendingWaves = wm.pendingWaves[1:]
 
-	// Create formation using factory
-	formation := wm.formationFactory.CreatePresetFormation(
-		waveDef.FormationType,
-		waveDef.SpawnPosition,
-		waveDef.EnemyType,
-		waveDef.EnemyLevel,
-		waveDef.EnemyCount,
-	)
+	var formation types.FormationController
+
+	if waveDef.PatternConfig != nil {
+		// JSON
+		formation = wm.formationFactory.CreateFormationWithConfig(
+			waveDef.FormationType,
+			waveDef.SpawnPosition,
+			waveDef.EnemyType,
+			waveDef.EnemyLevel,
+			waveDef.EnemyCount,
+			*waveDef.PatternConfig,
+		)
+	} else {
+		// defaut
+		formation = wm.formationFactory.CreatePresetFormation(
+			waveDef.FormationType,
+			waveDef.SpawnPosition,
+			waveDef.EnemyType,
+			waveDef.EnemyLevel,
+			waveDef.EnemyCount,
+		)
+	}
 
 	// Create active wave
 	activeWave := &ActiveWave{
@@ -293,7 +273,7 @@ func (wm *WaveManager) spawnNextWave(currentTime float64) {
 	wm.wavesThisLevel++
 
 	// Publish wave started event
-	wm.eventManager.Publish(interfaces.WaveStarted, map[string]interface{}{
+	wm.eventManager.Publish(interfaces.WaveStarted, map[string]any{
 		"wave_id":   waveDef.ID,
 		"formation": formation,
 		"level":     wm.currentLevel,
@@ -397,42 +377,68 @@ func (wm *WaveManager) spawnBossWave() {
 // WAVE GENERATION - Creates dynamic wave patterns
 
 func (wm *WaveManager) initializeLevel1Waves() {
-	waves := []WaveDefinition{
-		{
-			ID:            "level1_wave1_scouts",
-			FormationType: entity.PresetVFormation,
-			EnemyType:     graphics.Scout,
-			EnemyLevel:    graphics.Level1,
-			EnemyCount:    5,
-			SpawnDelay:    0.0,
-			SpawnPosition: types.Vector2D{X: 320, Y: -50},
-			Priority:      1,
-		},
-		{
-			ID:            "level1_wave2_line",
-			FormationType: entity.PresetLineFormation,
-			EnemyType:     graphics.Scout,
-			EnemyLevel:    graphics.Level1,
-			EnemyCount:    14,
-			SpawnDelay:    3.0,
-			SpawnPosition: types.Vector2D{X: 200, Y: -50},
-			Priority:      2,
-		},
-		{
-			ID:            "level1_wave3_fighters",
-			FormationType: entity.PresetSineWaveFormation,
-			EnemyType:     graphics.Fighter,
-			EnemyLevel:    graphics.Level1,
-			EnemyCount:    6,
-			SpawnDelay:    2.5,
-			SpawnPosition: types.Vector2D{X: 450, Y: -50},
-			Priority:      3,
-		},
-	}
+	levelDef := GetLevelDefinition(1)
 
 	wm.mu.Lock()
-	wm.pendingWaves = append(wm.pendingWaves, waves...)
-	wm.mu.Unlock()
+	defer wm.mu.Unlock()
+
+	for _, waveConfig := range levelDef.Waves {
+		wave := WaveDefinition{
+			ID:            waveConfig.ID,
+			FormationType: parseFormationType(waveConfig.Formation),
+			EnemyType:     parseEnemyType(waveConfig.EnemyType),
+			EnemyLevel:    graphics.EnemyLevel(waveConfig.EnemyLevel),
+			EnemyCount:    waveConfig.EnemyCount,
+			SpawnDelay:    waveConfig.Time,
+			SpawnPosition: types.Vector2D{X: waveConfig.Position.X, Y: waveConfig.Position.Y},
+			Priority:      1,
+		}
+
+		if waveConfig.Speed > 0 || waveConfig.Spacing > 0 {
+			wave.PatternConfig = &entity.PatternConfig{
+				Speed:         60.0,
+				VerticalSpeed: waveConfig.Speed * 60.0,
+				Spacing:       waveConfig.Spacing,
+				Radius:        waveConfig.Radius,
+				Amplitude:     waveConfig.Amplitude,
+				Frequency:     2.0,
+				RotationSpeed: 1.0,
+			}
+		}
+
+		wm.pendingWaves = append(wm.pendingWaves, wave)
+	}
+
+	wm.bossThreshold = levelDef.Boss.AppearsAfterWaves
+}
+
+// Fonctions helper
+func parseFormationType(formation string) entity.PresetFormationType {
+	switch formation {
+	case "V":
+		return entity.PresetVFormation
+	case "Line":
+		return entity.PresetLineFormation
+	case "Circle":
+		return entity.PresetCircleFormation
+	case "SineWave":
+		return entity.PresetSineWaveFormation
+	default:
+		return entity.PresetVFormation
+	}
+}
+
+func parseEnemyType(enemyType string) graphics.EnemyType {
+	switch enemyType {
+	case "Scout":
+		return graphics.Scout
+	case "Fighter":
+		return graphics.Fighter
+	case "Heavy":
+		return graphics.Heavy
+	default:
+		return graphics.Scout
+	}
 }
 
 func (wm *WaveManager) generateWavesForLevel(level int) {
