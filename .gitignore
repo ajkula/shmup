@@ -1,6 +1,10 @@
 *.exe
+*.dat
 !*.go
 !*.mod
 !*.sum
 !REDME.md
 !*.png
+.claude/
+.idea/
+.code/

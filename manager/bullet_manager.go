@@ -48,6 +48,8 @@ func (bm *BulletManager) Initialize(ctx context.Context) error {
 		interfaces.PlayerShot,
 		interfaces.EnemyShot,
 		interfaces.BossShot,
+		interfaces.BossDefeated,
+		interfaces.GameReset,
 	}
 
 	for _, eventType := range eventTypes {
@@ -100,6 +102,10 @@ func (bm *BulletManager) handleEvent(eventType interfaces.EventType, evt interfa
 		bm.handlePlayerShot(evt)
 	case interfaces.EnemyShot, interfaces.BossShot:
 		bm.handleEnemyShot(evt)
+	case interfaces.BossDefeated:
+		bm.destroyAllEnemyBullets()
+	case interfaces.GameReset:
+		bm.handleGameReset()
 	}
 }
 
@@ -229,6 +235,33 @@ func (bm *BulletManager) GetBullets() []types.GameEntity {
 	bullets := make([]types.GameEntity, len(bm.bullets))
 	copy(bullets, bm.bullets)
 	return bullets
+}
+
+func (bm *BulletManager) destroyAllEnemyBullets() {
+	// Destroy all enemy bullets when boss is defeated
+	// This prevents the player from dying after the boss is defeated
+	playerBullets := make([]types.GameEntity, 0)
+	for _, bullet := range bm.bullets {
+		if b, ok := bullet.(*entity.Bullet); ok {
+			if !b.IsEnemyBullet() {
+				// Keep player bullets
+				playerBullets = append(playerBullets, bullet)
+			}
+			// Enemy bullets are discarded
+		}
+	}
+	bm.bullets = playerBullets
+	fmt.Println("[BulletManager] Destroyed all enemy bullets after boss defeat")
+}
+
+func (bm *BulletManager) handleGameReset() {
+	bm.ClearAllBullets()
+}
+
+func (bm *BulletManager) ClearAllBullets() {
+	// Clear all bullets when game is reset
+	bm.bullets = bm.bullets[:0]
+	fmt.Println("[BulletManager] All bullets cleared - game reset")
 }
 
 func (bm *BulletManager) Shutdown() {

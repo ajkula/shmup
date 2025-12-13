@@ -32,6 +32,11 @@ const (
 	PresetLineFormation
 	PresetCircleFormation
 	PresetSineWaveFormation
+	PresetDiamondFormation
+	PresetWingsFormation
+	PresetSpiralFormation
+	PresetArrowFormation
+	PresetZigZagFormation
 )
 
 func (ff *FormationFactory) CreatePresetFormation(
@@ -56,12 +61,12 @@ func (ff *FormationFactory) CreatePresetFormation(
 		pattern = NewVFormationPattern(cfg)
 	case PresetLineFormation:
 		cfg.Spacing = 50.0
-		cfg.VerticalSpeed = config.Config.EnemySpeed * 1.2 // a bit faster
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 1.2
 		pattern = NewLineFormationPattern(cfg)
 	case PresetCircleFormation:
 		cfg.Radius = 60.0
 		cfg.RotationSpeed = 1.0
-		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.8 // a bit slower
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.8
 		pattern = NewCircleFormationPattern(cfg)
 	case PresetSineWaveFormation:
 		cfg.Amplitude = 100.0
@@ -69,6 +74,31 @@ func (ff *FormationFactory) CreatePresetFormation(
 		cfg.Spacing = 45.0
 		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.9
 		pattern = NewSineWaveFormationPattern(cfg)
+	case PresetDiamondFormation:
+		cfg.Spacing = 45.0
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 1.0
+		pattern = NewDiamondFormationPattern(cfg)
+	case PresetWingsFormation:
+		cfg.Spacing = 40.0
+		cfg.Radius = 120.0 // Wing spread
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.85
+		pattern = NewWingsFormationPattern(cfg)
+	case PresetSpiralFormation:
+		cfg.Radius = 30.0
+		cfg.Spacing = 15.0 // Spiral tightness
+		cfg.RotationSpeed = 1.5
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 0.7
+		pattern = NewSpiralFormationPattern(cfg)
+	case PresetArrowFormation:
+		cfg.Spacing = 42.0
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 1.3
+		pattern = NewArrowFormationPattern(cfg)
+	case PresetZigZagFormation:
+		cfg.Amplitude = 80.0
+		cfg.Spacing = 45.0
+		cfg.Frequency = 2.0 // Phase speed
+		cfg.VerticalSpeed = config.Config.EnemySpeed * 1.1
+		pattern = NewZigZagFormationPattern(cfg)
 	}
 
 	formation := NewFormation(id, pattern, centerPos, ff.eventManager)
@@ -111,6 +141,16 @@ func (ff *FormationFactory) CreateFormationWithConfig(
 		pattern = NewCircleFormationPattern(patternConfig)
 	case PresetSineWaveFormation:
 		pattern = NewSineWaveFormationPattern(patternConfig)
+	case PresetDiamondFormation:
+		pattern = NewDiamondFormationPattern(patternConfig)
+	case PresetWingsFormation:
+		pattern = NewWingsFormationPattern(patternConfig)
+	case PresetSpiralFormation:
+		pattern = NewSpiralFormationPattern(patternConfig)
+	case PresetArrowFormation:
+		pattern = NewArrowFormationPattern(patternConfig)
+	case PresetZigZagFormation:
+		pattern = NewZigZagFormationPattern(patternConfig)
 	}
 
 	formation := NewFormation(id, pattern, centerPos, ff.eventManager)

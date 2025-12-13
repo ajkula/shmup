@@ -12,11 +12,11 @@ type BaseEntity struct {
 	Width, Height float64
 	Speed         float64
 	Health        int
+	MaxHealth     int
 	Color         color.Color
 	sprite        *graphics.SpriteData
 }
 
-// GetSprite implements Entity.
 func (e *BaseEntity) GetSprite() *graphics.SpriteData {
 	return nil
 }
@@ -35,6 +35,10 @@ func (e *BaseEntity) GetSize() (float64, float64) {
 
 func (e *BaseEntity) GetHealth() int {
 	return e.Health
+}
+
+func (e *BaseEntity) GetMaxHealth() int {
+	return e.MaxHealth
 }
 
 func (e *BaseEntity) TakeDamage(amount int) {

@@ -192,3 +192,222 @@ func (s *SineWaveFormationPattern) GetCenterMovement(time float64) types.Vector2
 		Y: s.VerticalSpeed * time,
 	}
 }
+
+// DiamondFormationPattern - Diamond/Rhombus shape (classic arcade)
+type DiamondFormationPattern struct {
+	BaseMovementPattern
+	Spacing float64
+}
+
+func NewDiamondFormationPattern(config PatternConfig) *DiamondFormationPattern {
+	return &DiamondFormationPattern{
+		BaseMovementPattern: BaseMovementPattern{
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
+		},
+		Spacing: config.Spacing,
+	}
+}
+
+func (d *DiamondFormationPattern) GetOffset(enemyIndex int, time float64, formation types.FormationController) types.Vector2D {
+	enemyCount := len(formation.GetEnemies())
+	if enemyCount == 0 {
+		return types.Vector2D{}
+	}
+
+	// Diamond pattern: top point, sides, bottom point
+	// Works best with 5, 9, 13 enemies
+	layers := int(math.Sqrt(float64(enemyCount)))
+	centerLayer := layers / 2
+
+	layer := 0
+	indexInLayer := enemyIndex
+
+	for layer < layers {
+		enemiesInLayer := layer*2 + 1
+		if indexInLayer < enemiesInLayer {
+			break
+		}
+		indexInLayer -= enemiesInLayer
+		layer++
+	}
+
+	layerCenter := float64(layer*2) / 2.0
+	xOffset := (float64(indexInLayer) - layerCenter) * d.Spacing
+	yOffset := float64(layer-centerLayer) * d.Spacing * 0.8
+
+	return types.Vector2D{X: xOffset, Y: yOffset}
+}
+
+func (d *DiamondFormationPattern) GetCenterMovement(time float64) types.Vector2D {
+	return types.Vector2D{X: 0, Y: d.VerticalSpeed * time}
+}
+
+// WingsFormationPattern - Two groups flanking from sides (Galaga-style)
+type WingsFormationPattern struct {
+	BaseMovementPattern
+	Spacing    float64
+	WingSpread float64
+}
+
+func NewWingsFormationPattern(config PatternConfig) *WingsFormationPattern {
+	return &WingsFormationPattern{
+		BaseMovementPattern: BaseMovementPattern{
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
+		},
+		Spacing:    config.Spacing,
+		WingSpread: config.Radius, // Reuse radius for wing spread
+	}
+}
+
+func (w *WingsFormationPattern) GetOffset(enemyIndex int, time float64, formation types.FormationController) types.Vector2D {
+	enemyCount := len(formation.GetEnemies())
+	if enemyCount == 0 {
+		return types.Vector2D{}
+	}
+
+	// Split into two wings
+	halfCount := enemyCount / 2
+	isLeftWing := enemyIndex < halfCount
+
+	wingIndex := enemyIndex
+	if !isLeftWing {
+		wingIndex -= halfCount
+	}
+
+	xBase := -w.WingSpread
+	if !isLeftWing {
+		xBase = w.WingSpread
+	}
+
+	return types.Vector2D{
+		X: xBase + (float64(wingIndex%3) * w.Spacing * 0.5),
+		Y: float64(wingIndex/3) * w.Spacing * -0.6,
+	}
+}
+
+func (w *WingsFormationPattern) GetCenterMovement(time float64) types.Vector2D {
+	return types.Vector2D{X: 0, Y: w.VerticalSpeed * time}
+}
+
+// SpiralFormationPattern - Enemies in spiral (modern shmup)
+type SpiralFormationPattern struct {
+	BaseMovementPattern
+	Radius        float64
+	SpiralTight   float64
+	RotationSpeed float64
+}
+
+func NewSpiralFormationPattern(config PatternConfig) *SpiralFormationPattern {
+	return &SpiralFormationPattern{
+		BaseMovementPattern: BaseMovementPattern{
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
+		},
+		Radius:        config.Radius,
+		SpiralTight:   config.Spacing,
+		RotationSpeed: config.RotationSpeed,
+	}
+}
+
+func (sp *SpiralFormationPattern) GetOffset(enemyIndex int, time float64, formation types.FormationController) types.Vector2D {
+	enemyCount := len(formation.GetEnemies())
+	if enemyCount == 0 {
+		return types.Vector2D{}
+	}
+
+	// Spiral outward from center
+	angle := float64(enemyIndex) * (2 * math.Pi / 5) // 5 enemies per rotation
+	radius := sp.Radius + (float64(enemyIndex) * sp.SpiralTight)
+	currentAngle := angle + (sp.RotationSpeed * time)
+
+	return types.Vector2D{
+		X: math.Cos(currentAngle) * radius,
+		Y: math.Sin(currentAngle) * radius,
+	}
+}
+
+func (sp *SpiralFormationPattern) GetCenterMovement(time float64) types.Vector2D {
+	return types.Vector2D{X: 0, Y: sp.VerticalSpeed * time}
+}
+
+// ArrowFormationPattern - Arrow/Wedge pointing down (aggressive)
+type ArrowFormationPattern struct {
+	BaseMovementPattern
+	Spacing float64
+}
+
+func NewArrowFormationPattern(config PatternConfig) *ArrowFormationPattern {
+	return &ArrowFormationPattern{
+		BaseMovementPattern: BaseMovementPattern{
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
+		},
+		Spacing: config.Spacing,
+	}
+}
+
+func (a *ArrowFormationPattern) GetOffset(enemyIndex int, time float64, formation types.FormationController) types.Vector2D {
+	enemyCount := len(formation.GetEnemies())
+	if enemyCount == 0 {
+		return types.Vector2D{}
+	}
+
+	// Arrow pointing down: leader at front, rows behind
+	row := int(math.Sqrt(float64(enemyIndex)))
+	indexInRow := enemyIndex - (row * row)
+	rowWidth := row*2 + 1
+
+	centerPos := float64(rowWidth-1) / 2.0
+	xOffset := (float64(indexInRow) - centerPos) * a.Spacing
+	yOffset := float64(row) * a.Spacing * -0.7 // Negative = point forward
+
+	return types.Vector2D{X: xOffset, Y: yOffset}
+}
+
+func (a *ArrowFormationPattern) GetCenterMovement(time float64) types.Vector2D {
+	return types.Vector2D{X: 0, Y: a.VerticalSpeed * time}
+}
+
+// ZigZagFormationPattern - Zigzag pattern (classic arcade)
+type ZigZagFormationPattern struct {
+	BaseMovementPattern
+	Amplitude float64
+	Spacing   float64
+	Phase     float64
+}
+
+func NewZigZagFormationPattern(config PatternConfig) *ZigZagFormationPattern {
+	return &ZigZagFormationPattern{
+		BaseMovementPattern: BaseMovementPattern{
+			Speed:         config.Speed,
+			VerticalSpeed: config.VerticalSpeed,
+		},
+		Amplitude: config.Amplitude,
+		Spacing:   config.Spacing,
+		Phase:     config.Frequency,
+	}
+}
+
+func (z *ZigZagFormationPattern) GetOffset(enemyIndex int, time float64, formation types.FormationController) types.Vector2D {
+	enemyCount := len(formation.GetEnemies())
+	if enemyCount == 0 {
+		return types.Vector2D{}
+	}
+
+	centerIndex := float64(enemyCount-1) / 2.0
+	relativeIndex := float64(enemyIndex) - centerIndex
+
+	// Zigzag based on index and time
+	zigzag := math.Sin((relativeIndex+time*z.Phase)*0.5) * z.Amplitude
+
+	return types.Vector2D{
+		X: relativeIndex*z.Spacing + zigzag,
+		Y: 0,
+	}
+}
+
+func (z *ZigZagFormationPattern) GetCenterMovement(time float64) types.Vector2D {
+	return types.Vector2D{X: 0, Y: z.VerticalSpeed * time}
+}

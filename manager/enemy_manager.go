@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/ajkula/shmup/core"
@@ -35,6 +36,7 @@ func (em *EnemyManager) Initialize(ctx context.Context) error {
 	eventTypes := []interfaces.EventType{
 		interfaces.EnemyCreated,
 		interfaces.EnemyDestroyed,
+		interfaces.GameReset,
 	}
 
 	for _, eventType := range eventTypes {
@@ -66,6 +68,21 @@ func (em *EnemyManager) processAllEvents() {
 		return
 	}
 
+	// Check for game reset first
+	resetCh := em.eventChannels[interfaces.GameReset]
+	for {
+		select {
+		case _, ok := <-resetCh:
+			if !ok {
+				return
+			}
+			em.handleGameReset()
+		default:
+			goto processCreated
+		}
+	}
+
+processCreated:
 	createdCh := em.eventChannels[interfaces.EnemyCreated]
 	for {
 		select {
@@ -103,6 +120,16 @@ processDestroyed:
 	}
 }
 
+func (em *EnemyManager) handleGameReset() {
+	em.ClearAllEnemies()
+}
+
+func (em *EnemyManager) ClearAllEnemies() {
+	// Clear all enemies when game is reset
+	em.enemies = em.enemies[:0]
+	fmt.Println("[EnemyManager] All enemies cleared - game reset")
+}
+
 func (em *EnemyManager) updateEnemies() {
 	aliveEnemies := make([]types.GameEntity, 0, len(em.enemies))
 	for _, enemy := range em.enemies {
@@ -134,6 +161,18 @@ func (em *EnemyManager) GetEnemies() []types.GameEntity {
 	enemies := make([]types.GameEntity, len(em.enemies))
 	copy(enemies, em.enemies)
 	return enemies
+}
+
+func (em *EnemyManager) GetBoss() types.GameEntity {
+	// Find and return the first boss entity
+	for _, enemy := range em.enemies {
+		// Check if enemy is a Boss type by checking its width (bosses are 64x64)
+		width, height := enemy.GetSize()
+		if width == 64 && height == 64 && enemy.IsAlive() {
+			return enemy
+		}
+	}
+	return nil
 }
 
 func (em *EnemyManager) Shutdown() {

@@ -38,6 +38,7 @@ type Entity interface {
 	IsAlive() bool
 	TakeDamage(amount int)
 	GetHealth() int
+	GetMaxHealth() int
 	GetColor() color.Color
 	GetSprite() *graphics.SpriteData
 }

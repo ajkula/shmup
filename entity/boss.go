@@ -31,10 +31,11 @@ func NewBoss(position types.Vector2D, eventManager interfaces.EventManagerInterf
 
 	return &Boss{
 		BaseEntity: types.BaseEntity{
-			Position: position,
-			Width:    64, Height: 64,
-			Speed:  3,
-			Health: 1000,
+			Position:  position,
+			Width:     64, Height: 64,
+			Speed:     3,
+			Health:    1000,
+			MaxHealth: 1000,
 		},
 		phase:           1,
 		eventManager:    eventManager,
@@ -83,7 +84,14 @@ func (b *Boss) nextPattern() {
 }
 
 func (b *Boss) Draw(screen *ebiten.Image) {
-	// TODO: Add boss sprite rendering
+	// Don't draw dead boss
+	if !b.IsAlive() {
+		return
+	}
+	sprite := b.GetSprite()
+	if sprite != nil {
+		graphics.DrawSprite(screen, sprite, b.Position.X, b.Position.Y)
+	}
 }
 
 func (b *Boss) CanCollideWith(other types.Entity) bool {
@@ -105,8 +113,13 @@ func (b *Boss) OnCollision(other types.Entity) {
 		if !o.IsEnemyBullet() {
 			b.TakeDamage(10)
 			b.eventManager.Publish(interfaces.BossDamaged, b)
-			if b.Health <= 0 {
-				b.eventManager.Publish(interfaces.BossDefeated, b)
+			if b.Health <= 0 && b.IsAlive() == false {
+				// Boss defeated - publish event with position for explosion
+				b.eventManager.Publish(interfaces.BossDefeated, map[string]any{
+					"boss": b,
+					"x":    b.Position.X + b.Width/2,
+					"y":    b.Position.Y + b.Height/2,
+				})
 				b.eventManager.Publish(interfaces.ScoreEvent, 500)
 			}
 		}

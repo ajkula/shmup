@@ -17,15 +17,16 @@ const (
 	StatePlaying
 	StatePaused
 	StateGameOver
+	StateVictory
 )
 
 type StateManager struct {
 	core.BaseSystem
-	currentState    int32
-	eventManager    interfaces.EventManagerInterface
-	eventChannels   map[interfaces.EventType]<-chan interfaces.Event
-	mu              sync.RWMutex
-	isShutdown      int32
+	currentState  int32
+	eventManager  interfaces.EventManagerInterface
+	eventChannels map[interfaces.EventType]<-chan interfaces.Event
+	mu            sync.RWMutex
+	isShutdown    int32
 }
 
 func NewStateManager(eventManager interfaces.EventManagerInterface) *StateManager {
@@ -123,7 +124,29 @@ func (sm *StateManager) updateCurrentState() {
 		// Main menu logic
 	case StateGameOver:
 		// Game over logic
+	case StateVictory:
+		// Victory logic
 	}
+}
+
+func (sm *StateManager) IsPlaying() bool {
+	return sm.GetState() == StatePlaying
+}
+
+func (sm *StateManager) IsMenu() bool {
+	return sm.GetState() == StateMainMenu
+}
+
+func (sm *StateManager) IsGameOver() bool {
+	return sm.GetState() == StateGameOver
+}
+
+func (sm *StateManager) IsVictory() bool {
+	return sm.GetState() == StateVictory
+}
+
+func (sm *StateManager) SetState(newState GameState) {
+	sm.setState(newState)
 }
 
 func (sm *StateManager) handleStateChangeEvent(evt interfaces.Event) {

@@ -12,10 +12,14 @@ import (
 
 type Player struct {
 	types.BaseEntity
-	playerClass   graphics.PlayerClass
-	ShootCooldown float64
-	eventManager  interfaces.EventManagerInterface
-	inputEvents   <-chan interfaces.Event
+	playerClass              graphics.PlayerClass
+	ShootCooldown            float64
+	eventManager             interfaces.EventManagerInterface
+	inputEvents              <-chan interfaces.Event
+	Lives                    int
+	MaxLives                 int
+	InvulnerabilityTimer     float64
+	RespawnInvulnerability   float64
 }
 
 func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInterface) *Player {
@@ -28,16 +32,21 @@ func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInte
 
 	player := &Player{
 		BaseEntity: types.BaseEntity{
-			Position: position,
-			Width:    32, Height: 32,
-			Speed:  5,
-			Health: 100,
-			Color:  color.RGBA{0, 255, 0, 255},
+			Position:  position,
+			Width:     32, Height: 32,
+			Speed:     5,
+			Health:    100,
+			MaxHealth: 100,
+			Color:     color.RGBA{0, 255, 0, 255},
 		},
-		ShootCooldown: 0,
-		eventManager:  eventManager,
-		inputEvents:   inputChan,
-		playerClass:   graphics.StandardFighter,
+		ShootCooldown:          0,
+		eventManager:           eventManager,
+		inputEvents:            inputChan,
+		playerClass:            graphics.StandardFighter,
+		Lives:                  3,
+		MaxLives:               3,
+		InvulnerabilityTimer:   0,
+		RespawnInvulnerability: 2.0,
 	}
 
 	if config.Config.PlayerSpeed > 0 {
@@ -49,6 +58,12 @@ func NewPlayer(position types.Vector2D, eventManager interfaces.EventManagerInte
 
 func (p *Player) Update(deltaTime float64) error {
 	p.ShootCooldown -= deltaTime
+
+	// Update invulnerability timer
+	if p.InvulnerabilityTimer > 0 {
+		p.InvulnerabilityTimer -= deltaTime
+	}
+
 	p.processInputEvents()
 	p.constrainToScreen()
 	return nil
@@ -114,6 +129,19 @@ func (p *Player) constrainToScreen() {
 }
 
 func (p *Player) Draw(screen *ebiten.Image) {
+	if !p.IsAlive() {
+		return // Don't draw dead player
+	}
+
+	// Blink during invulnerability
+	if p.InvulnerabilityTimer > 0 {
+		// Blink every 0.1 seconds
+		blinkCycle := int(p.InvulnerabilityTimer * 10)
+		if blinkCycle%2 == 0 {
+			return // Skip drawing to create blink effect
+		}
+	}
+
 	sprite := graphics.GetPlayerSprite(graphics.StandardFighter)
 	graphics.DrawSprite(screen, sprite, p.Position.X, p.Position.Y)
 }
@@ -132,6 +160,11 @@ func (p *Player) CanCollideWith(other types.Entity) bool {
 }
 
 func (p *Player) OnCollision(other types.Entity) {
+	// Skip damage if invulnerable
+	if p.InvulnerabilityTimer > 0 {
+		return
+	}
+
 	switch o := other.(type) {
 	case *Enemy:
 		p.TakeDamage(20)
@@ -147,8 +180,48 @@ func (p *Player) OnCollision(other types.Entity) {
 	}
 
 	if p.Health <= 0 {
-		p.eventManager.Publish(interfaces.PlayerDestroyed, p)
+		p.Die()
 	}
+}
+
+func (p *Player) Die() {
+	p.Lives--
+
+	if p.eventManager != nil {
+		p.eventManager.Publish(interfaces.PlayerDied, map[string]any{
+			"lives": p.Lives,
+		})
+	}
+
+	if p.Lives <= 0 {
+		// Game Over
+		if p.eventManager != nil {
+			p.eventManager.Publish(interfaces.PlayerDestroyed, p)
+		}
+	} else {
+		// Respawn
+		p.Respawn()
+	}
+}
+
+func (p *Player) Respawn() {
+	p.Health = 100
+	p.Position.X = float64(config.Config.ScreenWidth/2) - p.Width/2
+	p.Position.Y = float64(config.Config.ScreenHeight - 100)
+	p.InvulnerabilityTimer = p.RespawnInvulnerability
+}
+
+func (p *Player) GetLives() int {
+	return p.Lives
+}
+
+func (p *Player) Reset() {
+	p.Lives = p.MaxLives
+	p.Health = p.MaxHealth
+	p.InvulnerabilityTimer = 0
+	p.ShootCooldown = 0
+	p.Position.X = float64(config.Config.ScreenWidth/2) - p.Width/2
+	p.Position.Y = float64(config.Config.ScreenHeight - 100)
 }
 
 func (p *Player) GetPlayerClass() graphics.PlayerClass {

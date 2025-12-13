@@ -78,6 +78,13 @@ func (b *Bullet) Destroy() {
 	}
 }
 
+func (b *Bullet) GetDamage() int {
+	if b.isEnemy {
+		return 10
+	}
+	return 20
+}
+
 func (b *Bullet) IsOutOfBounds() bool {
 	pos := b.GetPosition()
 	return pos.X < -10 || pos.X > float64(config.Config.ScreenWidth+10) ||

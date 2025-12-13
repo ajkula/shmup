@@ -13,12 +13,14 @@ const (
 	CollisionEvent
 	InputEvent
 	GameStateChangeEvent
+	GameReset
 	LevelEvent
 	LevelChanged
 	ScoreEvent
 	ScoreReset
 	PlayerShot
 	PlayerDamaged
+	PlayerDied
 	PlayerDestroyed
 	BulletCreated
 	BulletDestroyed
@@ -30,6 +32,7 @@ const (
 	BossPhaseChanged
 	BossDamaged
 	BossDefeated
+	Victory
 	EnemyAddedToFormation
 	EnemyRemovedFromFormation
 	FormationCreated

@@ -3,6 +3,9 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -21,12 +24,17 @@ type ScoreManager struct {
 }
 
 func NewScoreManager(eventManager interfaces.EventManagerInterface) *ScoreManager {
-	return &ScoreManager{
+	sm := &ScoreManager{
 		score:         0,
 		highScore:     0,
 		eventManager:  eventManager,
 		eventChannels: make(map[interfaces.EventType]<-chan interfaces.Event),
 	}
+
+	// Load high score from file
+	sm.loadHighScore()
+
+	return sm
 }
 
 func (sm *ScoreManager) Initialize(ctx context.Context) error {
@@ -94,6 +102,9 @@ func (sm *ScoreManager) AddScore(points int) {
 			break
 		}
 		if atomic.CompareAndSwapInt64(&sm.highScore, currentHigh, newScore) {
+			// New high score! Save it
+			sm.saveHighScore()
+			fmt.Printf("🏆 NEW HIGH SCORE: %d\n", newScore)
 			break
 		}
 	}
@@ -113,6 +124,34 @@ func (sm *ScoreManager) ResetScore() {
 	fmt.Println("Score reset")
 }
 
+func (sm *ScoreManager) loadHighScore() {
+	data, err := os.ReadFile("highscore.dat")
+	if err != nil {
+		// File doesn't exist or can't be read, start with 0
+		fmt.Println("No high score file found, starting fresh")
+		return
+	}
+
+	scoreStr := strings.TrimSpace(string(data))
+	highScore, err := strconv.ParseInt(scoreStr, 10, 64)
+	if err != nil {
+		fmt.Printf("Error parsing high score: %v\n", err)
+		return
+	}
+
+	atomic.StoreInt64(&sm.highScore, highScore)
+	fmt.Printf("Loaded high score: %d\n", highScore)
+}
+
+func (sm *ScoreManager) saveHighScore() {
+	highScore := atomic.LoadInt64(&sm.highScore)
+	err := os.WriteFile("highscore.dat", []byte(fmt.Sprintf("%d", highScore)), 0644)
+	if err != nil {
+		fmt.Printf("Error saving high score: %v\n", err)
+		return
+	}
+}
+
 func (sm *ScoreManager) Shutdown() {
 	if !atomic.CompareAndSwapInt32(&sm.isShutdown, 0, 1) {
 		return
@@ -125,8 +164,10 @@ func (sm *ScoreManager) Shutdown() {
 	sm.eventChannels = nil
 	sm.mu.Unlock()
 
+	// Save high score before shutdown
+	sm.saveHighScore()
+
 	atomic.StoreInt64(&sm.score, 0)
-	atomic.StoreInt64(&sm.highScore, 0)
 
 	fmt.Println("ScoreManager shut down")
 }

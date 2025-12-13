@@ -3,9 +3,10 @@ package manager
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ajkula/shmup/config"
 	"github.com/ajkula/shmup/core"
@@ -15,7 +16,6 @@ import (
 	"github.com/ajkula/shmup/types"
 )
 
-// WaveDefinition defines a wave to be spawned
 type WaveDefinition struct {
 	ID            string
 	FormationType entity.PresetFormationType
@@ -28,7 +28,6 @@ type WaveDefinition struct {
 	PatternConfig *entity.PatternConfig
 }
 
-// WaveState tracks wave lifecycle
 type WaveState int
 
 const (
@@ -45,7 +44,6 @@ type ActiveWave struct {
 	SpawnTime  float64
 }
 
-// WaveManager manages dynamic multi-wave spawning for arcade shmup
 type WaveManager struct {
 	core.BaseSystem
 
@@ -64,17 +62,19 @@ type WaveManager struct {
 	formationFactory *entity.FormationFactory
 	gameTime         float64
 	lastWaveSpawn    float64
-	minWaveInterval  float64 // minimum time between waves
-	maxActiveWaves   int     // max simultaneous waves for performance
+	minWaveInterval  float64
+	maxActiveWaves   int
 
 	// Level progression
 	currentLevel   int
 	wavesThisLevel int
-	waveMultiplier float64 // increases difficulty
+	waveMultiplier float64
 
 	// Boss management
-	bossWaveActive bool
-	bossThreshold  int // waves before boss
+	bossWaveActive        bool
+	bossDefeatedThisLevel bool
+	bossThreshold         int
+	waitingForVictory     bool // Flag to indicate we're waiting for all waves to clear before Victory
 }
 
 func NewWaveManager(eventManager interfaces.EventManagerInterface) *WaveManager {
@@ -105,6 +105,7 @@ func (wm *WaveManager) Initialize(ctx context.Context) error {
 		interfaces.FormationDestroyed,
 		interfaces.LevelChanged,
 		interfaces.PlayerDestroyed,
+		interfaces.BossDefeated,
 	}
 
 	for _, eventType := range eventTypes {
@@ -115,13 +116,13 @@ func (wm *WaveManager) Initialize(ctx context.Context) error {
 		wm.eventChannels[eventType] = ch
 	}
 
-	// Initialize with starter waves for level 1
-	wm.initializeLevel1Waves()
+	wm.generateWavesForLevel(1)
 
 	return nil
 }
 
 func (wm *WaveManager) Update(deltaTime float64) error {
+
 	select {
 	case <-wm.CTX.Done():
 		return wm.CTX.Err()
@@ -156,12 +157,14 @@ func (wm *WaveManager) processAllAvailableEvents() {
 		wm.eventChannels[interfaces.FormationDestroyed],
 		wm.eventChannels[interfaces.LevelChanged],
 		wm.eventChannels[interfaces.PlayerDestroyed],
+		wm.eventChannels[interfaces.BossDefeated],
 	}
 
 	handlers := []func(interfaces.Event){
 		wm.handleFormationDestroyed,
 		wm.handleLevelChanged,
 		wm.handlePlayerDestroyed,
+		wm.handleBossDefeated,
 	}
 
 	for i, ch := range eventChannels {
@@ -186,9 +189,6 @@ func (wm *WaveManager) updateWaveSpawning() {
 	currentTime := wm.gameTime
 	wm.mu.Unlock()
 
-	// UPDATE LES FORMATIONS ICI
-	wm.updateActiveFormations()
-
 	// Check if we can spawn new waves
 	if wm.canSpawnWave(currentTime) {
 		wm.spawnNextWave(currentTime)
@@ -210,19 +210,34 @@ func (wm *WaveManager) canSpawnWave(currentTime float64) bool {
 		return false
 	}
 
+	// Don't spawn waves if boss is active or defeated
+	if wm.bossWaveActive || wm.bossDefeatedThisLevel {
+		return false
+	}
+
 	// Too many active waves
 	if len(wm.activeWaves) >= wm.maxActiveWaves {
+		fmt.Printf("Cannot spawn: too many active waves (%d/%d)\n", len(wm.activeWaves), wm.maxActiveWaves)
 		return false
 	}
 
 	// Too soon after last spawn
-	if currentTime-wm.lastWaveSpawn < wm.minWaveInterval {
+	timeSinceLastSpawn := currentTime - wm.lastWaveSpawn
+	if timeSinceLastSpawn < wm.minWaveInterval {
 		return false
 	}
 
 	// Check if next wave is ready based on its delay
 	nextWave := wm.pendingWaves[0]
-	return currentTime >= wm.lastWaveSpawn+nextWave.SpawnDelay
+	readyTime := wm.lastWaveSpawn + nextWave.SpawnDelay
+	canSpawn := currentTime >= readyTime
+
+	if !canSpawn && int(currentTime)%60 == 0 {
+		fmt.Printf("Wave not ready: current=%.2f, lastSpawn=%.2f, delay=%.2f, ready=%.2f\n",
+			currentTime, wm.lastWaveSpawn, nextWave.SpawnDelay, readyTime)
+	}
+
+	return canSpawn
 }
 
 func (wm *WaveManager) spawnNextWave(currentTime float64) {
@@ -236,6 +251,7 @@ func (wm *WaveManager) spawnNextWave(currentTime float64) {
 	// Get next wave to spawn
 	waveDef := wm.pendingWaves[0]
 	wm.pendingWaves = wm.pendingWaves[1:]
+	fmt.Printf("Wave spawned, remaining pending: %d\n", len(wm.pendingWaves))
 
 	var formation types.FormationController
 
@@ -278,8 +294,8 @@ func (wm *WaveManager) spawnNextWave(currentTime float64) {
 		"formation": formation,
 		"level":     wm.currentLevel,
 	})
-
-	fmt.Printf("Spawned wave: %s (Active waves: %d)\n", waveDef.ID, len(wm.activeWaves))
+	time := time.Now()
+	fmt.Printf("%s Spawned wave: %s (Active waves: %d)\n", time, waveDef.ID, len(wm.activeWaves))
 }
 
 func (wm *WaveManager) updateActiveWaves() {
@@ -296,7 +312,10 @@ func (wm *WaveManager) updateActiveWaves() {
 			wave.State = WaveCompleted
 			wm.completedWaves = append(wm.completedWaves, wave)
 
-			wm.eventManager.Publish(interfaces.WaveCompleted, map[string]interface{}{
+			fmt.Printf("Wave completed: %s (Active: %d -> %d, Completed: %d)\n",
+				wave.Definition.ID, len(wm.activeWaves), len(wm.activeWaves)-1, len(wm.completedWaves))
+
+			wm.eventManager.Publish(interfaces.WaveCompleted, map[string]any{
 				"wave_id":   wave.Definition.ID,
 				"formation": wave.Formation,
 			})
@@ -310,24 +329,22 @@ func (wm *WaveManager) updateActiveWaves() {
 }
 
 func (wm *WaveManager) handleFormationDestroyed(evt interfaces.Event) {
-	// Formation destruction is handled in updateActiveWaves
+	// noop
 }
 
 func (wm *WaveManager) handleLevelChanged(evt interfaces.Event) {
 	if level, ok := evt.Data.(int); ok {
 		wm.mu.Lock()
 		wm.currentLevel = level
-		wm.waveMultiplier += 0.2 // Increase difficulty
+		wm.waveMultiplier += 0.2
 		wm.wavesThisLevel = 0
 		wm.mu.Unlock()
 
-		// Generate waves for new level
 		wm.generateWavesForLevel(level)
 	}
 }
 
 func (wm *WaveManager) handlePlayerDestroyed(evt interfaces.Event) {
-	// Stop spawning new waves when player is destroyed
 	wm.mu.Lock()
 	wm.pendingWaves = wm.pendingWaves[:0]
 	wm.mu.Unlock()
@@ -335,18 +352,57 @@ func (wm *WaveManager) handlePlayerDestroyed(evt interfaces.Event) {
 
 func (wm *WaveManager) checkLevelProgression() {
 	wm.mu.RLock()
-	wavesCompleted := len(wm.completedWaves)
+
+	wavesCompletedThisLevel := 0
+	levelPrefix := fmt.Sprintf("level%d_", wm.currentLevel)
+	for _, wave := range wm.completedWaves {
+		if wave.Definition != nil && strings.HasPrefix(wave.Definition.ID, levelPrefix) {
+			wavesCompletedThisLevel++
+		}
+	}
+
 	pendingCount := len(wm.pendingWaves)
 	activeCount := len(wm.activeWaves)
-	shouldSpawnBoss := wavesCompleted >= wm.bossThreshold && !wm.bossWaveActive
+	currentLevel := wm.currentLevel
+	bossActive := wm.bossWaveActive
+	bossDefeated := wm.bossDefeatedThisLevel
+	threshold := wm.bossThreshold
 	wm.mu.RUnlock()
 
-	// Level complete when all waves done and no boss active
-	if pendingCount == 0 && activeCount == 0 && !wm.bossWaveActive {
-		// Advance to next level
-		wm.eventManager.Publish(interfaces.LevelChanged, wm.currentLevel+1)
-	} else if shouldSpawnBoss {
+	if wavesCompletedThisLevel >= threshold && !bossActive && !bossDefeated && activeCount == 0 && pendingCount == 0 {
+		fmt.Printf("Boss conditions met! Spawning boss...\n")
 		wm.spawnBossWave()
+		return
+	}
+
+	if bossActive {
+		return
+	}
+
+	if bossDefeated && pendingCount == 0 && activeCount == 0 {
+		// Check if there's a next level
+		nextLevel := currentLevel + 1
+		hasNextLevel := nextLevel <= len(AllLevels)
+
+		if hasNextLevel {
+			// Continue to next level
+			wm.mu.Lock()
+			wm.currentLevel++
+			wm.wavesThisLevel = 0
+			wm.completedWaves = wm.completedWaves[:0]
+			wm.bossDefeatedThisLevel = false
+			wm.mu.Unlock()
+
+			fmt.Printf("Level %d complete! Starting level %d\n", currentLevel, wm.currentLevel)
+			wm.generateWavesForLevel(wm.currentLevel)
+		} else {
+			// No more levels - trigger Victory
+			fmt.Println("All levels completed - VICTORY!")
+			wm.mu.Lock()
+			wm.waitingForVictory = false // Reset flag
+			wm.mu.Unlock()
+			wm.eventManager.Publish(interfaces.Victory, nil)
+		}
 	}
 }
 
@@ -360,34 +416,61 @@ func (wm *WaveManager) spawnBossWave() {
 
 	wm.bossWaveActive = true
 
-	// Create boss at top center of screen
+	levelDef := GetLevelDefinition(wm.currentLevel)
+	bossConfig := levelDef.Boss
+
 	bossPos := types.Vector2D{
-		X: float64(config.Config.ScreenWidth / 2),
-		Y: 50,
+		X: bossConfig.Position.X,
+		Y: bossConfig.Position.Y,
+	}
+
+	if bossConfig.Position.X < 0 {
+		bossPos.X = float64(config.Config.ScreenWidth / 2)
 	}
 
 	boss := entity.NewBoss(bossPos, wm.eventManager)
+	boss.Health = bossConfig.Health
+	boss.MaxHealth = bossConfig.Health
 
-	// Notify that boss spawned
 	wm.eventManager.Publish(interfaces.EnemyCreated, boss)
 
 	fmt.Printf("Boss spawned at level %d!\n", wm.currentLevel)
 }
 
-// WAVE GENERATION - Creates dynamic wave patterns
+func (wm *WaveManager) handleBossDefeated(evt interfaces.Event) {
+	wm.mu.Lock()
+	wm.bossWaveActive = false
+	currentLevel := wm.currentLevel
+	wm.bossDefeatedThisLevel = true
+	// Clear pending waves immediately to prevent any spawns during transition
+	wm.pendingWaves = wm.pendingWaves[:0]
+	wm.mu.Unlock()
 
-func (wm *WaveManager) initializeLevel1Waves() {
-	levelDef := GetLevelDefinition(1)
+	fmt.Printf("%s Boss defeated at level %d!\n", time.Now(), currentLevel)
 
+	// checkLevelProgression() will handle level transition or Victory
+	// once all active waves are cleared
+}
+
+// WAVE GENERATION
+
+func (wm *WaveManager) generateWavesForLevel(level int) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
+	wm.generateWavesForLevelUnsafe(level)
+}
+
+func (wm *WaveManager) generateWavesForLevelUnsafe(level int) {
+	levelDef := GetLevelDefinition(level)
+
+	wm.pendingWaves = make([]WaveDefinition, 0)
 
 	for _, waveConfig := range levelDef.Waves {
 		wave := WaveDefinition{
-			ID:            waveConfig.ID,
+			ID:            fmt.Sprintf("level%d_%s", level, waveConfig.ID),
 			FormationType: parseFormationType(waveConfig.Formation),
 			EnemyType:     parseEnemyType(waveConfig.EnemyType),
-			EnemyLevel:    graphics.EnemyLevel(waveConfig.EnemyLevel),
+			EnemyLevel:    graphics.EnemyLevel(waveConfig.EnemyLevel - 1 + level),
 			EnemyCount:    waveConfig.EnemyCount,
 			SpawnDelay:    waveConfig.Time,
 			SpawnPosition: types.Vector2D{X: waveConfig.Position.X, Y: waveConfig.Position.Y},
@@ -423,6 +506,16 @@ func parseFormationType(formation string) entity.PresetFormationType {
 		return entity.PresetCircleFormation
 	case "SineWave":
 		return entity.PresetSineWaveFormation
+	case "Diamond":
+		return entity.PresetDiamondFormation
+	case "Wings":
+		return entity.PresetWingsFormation
+	case "Spiral":
+		return entity.PresetSpiralFormation
+	case "Arrow":
+		return entity.PresetArrowFormation
+	case "ZigZag":
+		return entity.PresetZigZagFormation
 	default:
 		return entity.PresetVFormation
 	}
@@ -439,47 +532,6 @@ func parseEnemyType(enemyType string) graphics.EnemyType {
 	default:
 		return graphics.Scout
 	}
-}
-
-func (wm *WaveManager) generateWavesForLevel(level int) {
-	// Generate dynamic waves based on level
-	baseEnemyCount := 3 + level
-	waveCount := 4 + (level * 2)
-
-	waves := make([]WaveDefinition, 0, waveCount)
-
-	for i := 0; i < waveCount; i++ {
-		// Randomize formation types and positions for variety
-		formationType := entity.PresetFormationType(rand.Intn(4))
-		enemyType := graphics.EnemyType(rand.Intn(3)) // Scout, Fighter, Heavy
-
-		spawnX := 100 + rand.Float64()*440 // Random X between 100-540
-
-		wave := WaveDefinition{
-			ID:            fmt.Sprintf("level%d_wave%d", level, i+1),
-			FormationType: formationType,
-			EnemyType:     enemyType,
-			EnemyLevel:    graphics.EnemyLevel(min(level-1, 4)), // Cap at Level5
-			EnemyCount:    baseEnemyCount + rand.Intn(3),
-			SpawnDelay:    2.0 + rand.Float64()*3.0, // 2-5 seconds
-			SpawnPosition: types.Vector2D{X: spawnX, Y: -50},
-			Priority:      i + 1,
-		}
-
-		waves = append(waves, wave)
-	}
-
-	wm.mu.Lock()
-	wm.pendingWaves = append(wm.pendingWaves, waves...)
-	wm.completedWaves = wm.completedWaves[:0] // Reset completed waves
-	wm.mu.Unlock()
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // Public API for external control
@@ -510,6 +562,35 @@ func (wm *WaveManager) ForceSpawnWave() {
 	if wm.canSpawnWave(currentTime) {
 		wm.spawnNextWave(currentTime)
 	}
+}
+
+func (wm *WaveManager) ResetToLevel1() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+
+	fmt.Println("[WaveManager] Resetting to level 1")
+
+	// Clear all waves
+	wm.pendingWaves = wm.pendingWaves[:0]
+	wm.activeWaves = wm.activeWaves[:0]
+	wm.completedWaves = wm.completedWaves[:0]
+
+	// Reset level state
+	wm.currentLevel = 1
+	wm.wavesThisLevel = 0
+	wm.waveMultiplier = 1.0
+	wm.gameTime = 0
+	wm.lastWaveSpawn = 0
+
+	// Reset boss state
+	wm.bossWaveActive = false
+	wm.bossDefeatedThisLevel = false
+	wm.waitingForVictory = false
+
+	// Generate level 1 waves (use Unsafe version since we already have the lock)
+	wm.generateWavesForLevelUnsafe(1)
+
+	fmt.Printf("[WaveManager] Reset complete - %d waves ready for level 1\n", len(wm.pendingWaves))
 }
 
 func (wm *WaveManager) Shutdown() {

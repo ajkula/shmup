@@ -109,7 +109,20 @@ func (em *ExplosionManager) CreateExplosionFromSprite(sprite *graphics.SpriteDat
 
 func (em *ExplosionManager) CreateExplosionFromEntity(entity types.Entity) {
 	position := entity.GetPosition()
-	sprite := entity.GetSprite()
+
+	var sprite *graphics.SpriteData
+
+	switch e := entity.(type) {
+	case interface{ GetSprite() *graphics.SpriteData }:
+		sprite = e.GetSprite()
+	case interface {
+		GetEnemyType() graphics.EnemyType
+		GetEnemyLevel() graphics.EnemyLevel
+	}:
+		sprite = graphics.GetEnemySprite(e.GetEnemyType(), e.GetEnemyLevel())
+	default:
+		sprite = nil
+	}
 
 	if sprite != nil {
 		em.CreateExplosionFromSprite(sprite, position)
